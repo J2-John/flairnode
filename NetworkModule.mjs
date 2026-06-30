@@ -196,7 +196,7 @@ class NetworkModule {
     		eventHub.emit('moduleStatus', {
     			name: 'NetworkModule',
     			status: 'online',
-    			data: 'Connected to the attitude.lighting server!',
+    			data: 'Connected to flairled.com',
     		});
     	}
 
@@ -292,7 +292,7 @@ class NetworkModule {
 	    		eventHub.emit('moduleStatus', { 
 	    			name: 'NetworkModule', 
 	    			status: 'online',
-	    			data: 'Connected to the attitude.lighting server!',
+	    			data: 'Connected to flairled.com',
 	    		});
     		}
 
