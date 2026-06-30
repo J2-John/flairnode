@@ -30,6 +30,7 @@ const LAPTOP_MODE = (process.platform == 'darwin');  // checks whether we're run
 const PING_INTERVAL = 1000;  // interval in ms to ping the server (should be 1000ms)
 const MAX_ERROR_COUNT = 5; // max number of failed requests before payload will be saved to missed messages queue
 const NETWORK_REQUEST_TIMEOUT_MS = 15000;  // number of milliseconds to wait before considering the last request to have timed out
+const OFFLINE_THRESHOLD_MS = 35000;  // milliseconds since the last successful response before we consider the connection offline
 
 const VERBOSE_LOGGING = false;
 
@@ -75,6 +76,9 @@ class NetworkModule {
 		// init the request in progress system
 	  	this.requestInProgress = false;
 	  	this.lastRequestTimestamp = Date.now();
+
+		// track the last time a network request succeeded, used to detect online/offline status
+		this.lastSuccessfulResponseTimestamp = 0;
 
 		// Init missed messages system
 		this.errorCounter = 0;
@@ -181,6 +185,21 @@ class NetworkModule {
     	// grab the current time
     	const now = Date.now();
 
+    	// on each sync cycle, emit online/offline status based on time since last successful response
+    	if ((now - this.lastSuccessfulResponseTimestamp) > OFFLINE_THRESHOLD_MS) {
+    		eventHub.emit('moduleStatus', {
+    			name: 'NetworkModule',
+    			status: 'offline',
+    			data: `No successful response in over ${OFFLINE_THRESHOLD_MS}ms`,
+    		});
+    	} else {
+    		eventHub.emit('moduleStatus', {
+    			name: 'NetworkModule',
+    			status: 'online',
+    			data: 'Connected to the attitude.lighting server!',
+    		});
+    	}
+
     	// check if we're already running a request
     	if (this.requestInProgress && this.lastRequestTimestamp && (now - this.lastRequestTimestamp) < NETWORK_REQUEST_TIMEOUT_MS) {
     		// since we're already running a request and it hasn't timed out yet, log this
@@ -245,6 +264,9 @@ class NetworkModule {
 		    	// if not ok, throw an error
 		        throw new Error(`Request failed with status ${response.status}`);
 		    }
+
+			// update the last successful response timestamp
+			this.lastSuccessfulResponseTimestamp = Date.now();
 
 			// log a success message
 			if (configManager.checkLogLevel('minimal')) {
