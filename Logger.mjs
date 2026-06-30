@@ -10,7 +10,7 @@ import eventHub from './EventHub.mjs';
 
 // variables & options
 const LAPTOP_MODE = (process.platform == 'darwin');
-const DEV_MODE = true; // if set to true, logs will still show even on raspberry pi units
+const DEV_MODE = (process.env.NODE_ENV === 'development'); // if set to true, logs will still show even on raspberry pi units
 
 const MAX_TIME_SINCE_DUPLICATE_LOG_SHOWN = 5000; // max interval in ms to ensure duplicate logs are still shown at some point
 const CLEANUP_INTERVAL = 10000; // interval to clean up old log entries in ms
