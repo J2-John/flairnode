@@ -306,8 +306,9 @@ class PlaybackController {
 			}
 
 			// validate the packet
-			// this didnt work for some reason as of 8-6-25 so i just cut it out and we'll go without validating
-			// this.validateSenseDataObject(object);
+			if (!this.validateSenseDataObject(object)) {
+				return;
+			}
 
     		// if detail log level, log that we just got a status packet
 			if (configManager.checkLogLevel('detail')) {
@@ -343,6 +344,31 @@ class PlaybackController {
     		// else log error
             logger.error(`Error processing sense data message: ${error}`);
         }
+	}
+
+
+
+	// validateSenseDataObject - validate the DATA field of a Sense TYPE=1 packet
+	// DATA must be 19 comma-separated binary values: ports 0-14 = carwash inputs, ports 15-18 = relay/contact closure inputs
+	validateSenseDataObject(object) {
+		if (typeof object?.DATA !== 'string') {
+			logger.warn(`Sense packet rejected: DATA is missing or not a string (ID: ${object?.ID})`);
+			return false;
+		}
+
+		const parts = object.DATA.split(',');
+
+		if (parts.length !== 19) {
+			logger.warn(`Sense packet rejected: DATA has ${parts.length} values, expected 19 (ID: ${object?.ID})`);
+			return false;
+		}
+
+		if (!parts.every(value => value === '0' || value === '1')) {
+			logger.warn(`Sense packet rejected: DATA contains non-binary values (ID: ${object?.ID}): ${object.DATA}`);
+			return false;
+		}
+
+		return true;
 	}
 
 
