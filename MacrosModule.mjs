@@ -26,6 +26,9 @@ const SAMPLE_INTERVAL = 15000;  // interval for how often to process macros (sho
 const LAPTOP_MODE = (process.platform == 'darwin');
 const MACROS_PROCESSING_TIMEOUT = 60000;  // should be 60000ms
 
+const MACRO_ACTION_FILE_PATH = './lastMacroActioned.json';  // path to the file that tracks when reboot/update were last actioned
+const MACRO_ACTION_GUARD_WINDOW = 300000;  // don't re-action reboot/update within this window (should be 300000ms / 5 min)
+
 
 
 // Define the MacrosModule class
@@ -132,6 +135,57 @@ class MacrosModule {
     }
 
 
+    // check if the given action (reboot/update) was already actioned within the guard window,
+    // to avoid re-triggering it on every sync cycle while the cloud still has the flag set
+    wasRecentlyActioned(actionType) {
+        try {
+            // load the raw data as a string from the file at this path
+            const rawData = fs.readFileSync(MACRO_ACTION_FILE_PATH);
+
+            // parse JSON data
+            const parsedData = JSON.parse(rawData);
+
+            // pull the timestamp for this action type
+            const lastActionedAt = parsedData[actionType];
+
+            // if there's no timestamp recorded for this action, it hasn't been actioned recently
+            if (!lastActionedAt) {
+                return false;
+            }
+
+            // return whether the timestamp falls within the guard window
+            return (Date.now() - lastActionedAt) < MACRO_ACTION_GUARD_WINDOW;
+        } catch (error) {
+            // file doesn't exist yet or is corrupt, so treat as not recently actioned
+            return false;
+        }
+    }
+
+
+    // record that the given action (reboot/update) was just actioned, so subsequent
+    // sync cycles within the guard window know to skip it
+    markActioned(actionType) {
+        try {
+            // start with whatever's already in the file, so we don't clobber the other action's timestamp
+            let data = {};
+            try {
+                data = JSON.parse(fs.readFileSync(MACRO_ACTION_FILE_PATH));
+            } catch (readError) {
+                data = {};
+            }
+
+            // set the timestamp for this action type
+            data[actionType] = Date.now();
+
+            // write it back to the file
+            fs.writeFileSync(MACRO_ACTION_FILE_PATH, JSON.stringify(data, null, 2));
+        } catch (error) {
+            // log the error, but don't block the action from proceeding
+            logger.error(`Error saving ${actionType} action timestamp: ${error.message}`);
+        }
+    }
+
+
     // handle reboot command
     handleReboot() {
         // return a promise
@@ -139,6 +193,25 @@ class MacrosModule {
         
             // check if a reboot command has been queued from the server
             if (this.rebootQueuedFromServer == true) {
+
+                // check if this reboot was already actioned recently, to avoid looping
+                // if the cloud hasn't cleared the reboot flag yet
+                if (this.wasRecentlyActioned('reboot')) {
+                    // log that we're skipping
+                    logger.warn(`Reboot already actioned recently, skipping to avoid a reboot loop.`);
+
+                    // report success so the server sees it and (hopefully) clears the flag
+                    this.rebootCommandSuccess = true;
+                    this.rebootCommandResults = 'Reboot already actioned recently, skipped to avoid a loop.';
+
+                    // resolve without re-actioning
+                    resolve(this.rebootCommandResults);
+                    return;
+                }
+
+                // record that we're actioning this reboot now, before executing it,
+                // so we don't re-action it on the next sync cycle
+                this.markActioned('reboot');
 
                 // check if we're running on laptop or raspi
                 if (!LAPTOP_MODE) {
@@ -252,6 +325,25 @@ class MacrosModule {
 
             // check if an update command has been queued from the server
             if (this.updateQueuedFromServer == true) {
+
+                // check if this update was already actioned recently, to avoid looping
+                // if the cloud hasn't cleared the update flag yet
+                if (this.wasRecentlyActioned('update')) {
+                    // log that we're skipping
+                    logger.warn(`Update already actioned recently, skipping to avoid an update loop.`);
+
+                    // report success so the server sees it and (hopefully) clears the flag
+                    this.updateCommandSuccess = true;
+                    this.updateCommandResults = 'Update already actioned recently, skipped to avoid a loop.';
+
+                    // resolve without re-actioning
+                    resolve(this.updateCommandResults);
+                    return;
+                }
+
+                // record that we're actioning this update now, before executing it,
+                // so we don't re-action it on the next sync cycle
+                this.markActioned('update');
 
                 // log that an update was queued
                 logger.info('Update queued from server!');
