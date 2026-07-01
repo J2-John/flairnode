@@ -50,6 +50,9 @@ class StatusTracker {
 
         // run once immediately
         this.processSystemStatus();
+
+        // signal that this module has finished initializing
+        eventHub.emit('moduleReady', 'StatusTracker');
     }
 
 

@@ -33,58 +33,61 @@ logger.info('Copyright 2025 Drew Shipps, J Squared Systems');
 logger.info('System initializing at time ' + new Date());
 
 
-// init render socket client
-setTimeout(() => {
-	renderSocketClient.init();
-}, 10);
+// track which modules have reported that they've finished initializing, via the 'moduleReady' event
+// each module emits this event as the last step of its own init() function
+const readyModules = new Set();
+eventHub.on('moduleReady', (name) => readyModules.add(name));
 
-// initialize config manager and id manager
-setTimeout(() => {
-	idManager.init();
-	configManager.init();
-}, 20);
+// whenReady - invoke fn() once every module named in deps has emitted 'moduleReady'
+// (checks immediately in case the dependencies are already ready, then re-checks on each new moduleReady event)
+function whenReady(deps, fn) {
+	const check = () => {
+		if (deps.every((dep) => readyModules.has(dep))) {
+			eventHub.removeListener('moduleReady', check);
+			fn();
+		}
+	};
+
+	eventHub.on('moduleReady', check);
+	check();
+}
 
 
-// initialize network module so it can begin listening for messages
-setTimeout(() => {
+// these modules have no dependencies on other modules during init, so start them immediately
+idManager.init();
+configManager.init();
+renderSocketClient.init();
+
+
+// network module needs id and config data to be loaded before its request interval can run correctly
+whenReady(['IdManager', 'ConfigManager'], () => {
 	networkModule.init();
-}, 30);
+});
 
 
-// initialize status trackers
-setTimeout(() => {
+// these modules emit status events that network module must be listening for before they fire,
+// so they wait for network module to have bound its eventHub listeners
+whenReady(['NetworkModule'], () => {
 	statusTracker.init();
 	moduleStatusTracker.init();
-}, 40);
-
-
-// initialize playback controller
-setTimeout(() => {
-	playbackController.init();
-}, 50);
-
-
-// initialize macros module
-setTimeout(() => {
-	macrosModule.init();
-}, 70);
-
-
-// initialize UDP Manager
-setTimeout(() => {
 	udpManager.init();
-}, 80);
-
-
-// initialize content download manager
-setTimeout(() => {
 	contentDownloadManager.init();
-}, 90);
+});
+
+
+// these modules send commands through the render socket client and listen for network module's events
+whenReady(['NetworkModule', 'RenderSocketClient'], () => {
+	playbackController.init();
+	macrosModule.init();
+});
 
 
 // initialization sequence complete!
-setTimeout(() => {
-	logger.info('Device initialization sequence complete!');
-}, 100);
+whenReady(
+	['StatusTracker', 'ModuleStatusTracker', 'UDPManager', 'ContentDownloadManager', 'PlaybackController', 'MacrosModule'],
+	() => {
+		logger.info('Device initialization sequence complete!');
+	}
+);
 
 

@@ -88,6 +88,9 @@ class RenderSocketClient {
 		this.wss.on('error', (err) => {
 			logger.error(`WebSocket server error: ${err.message}`);
 		});
+
+		// signal that this module has finished initializing
+		eventHub.emit('moduleReady', 'RenderSocketClient');
 	}
 
 

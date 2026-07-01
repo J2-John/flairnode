@@ -63,6 +63,9 @@ class ContentDownloadManager {
 
 		// log initialization
 		logger.info(`Initializing Content Download Manager...`);
+
+		// signal that this module has finished initializing
+		eventHub.emit('moduleReady', 'ContentDownloadManager');
 	}
 
 

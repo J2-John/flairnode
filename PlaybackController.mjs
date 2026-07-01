@@ -106,6 +106,9 @@ class PlaybackController {
 
 		// log initialization
 		logger.info(`Initializing Playback Controller...`);
+
+		// signal that this module has finished initializing
+		eventHub.emit('moduleReady', 'PlaybackController');
 	}
 
 

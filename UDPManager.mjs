@@ -49,30 +49,36 @@ class UDPManager {
 			this.socket.bind(UDP_PORT, () => {
 				// enable broadcast mode
 				this.socket.setBroadcast(true);
+
+				// log successful init
+				logger.info(`UDPManager initialized on port ${UDP_PORT}`);
+
+				// emit module status event
+				eventHub.emit('moduleStatus', {
+					name: 'UDPManager',
+					status: 'operational',
+					data: '',
+				});
+
+				// signal that this module has finished initializing, now that the socket is actually bound
+				eventHub.emit('moduleReady', 'UDPManager');
 			});
 
 			// attach handler function for received messages
 			this.socket.on('message', this.handleMessage);
-
-			// log successful init
-			logger.info(`UDPManager initialized on port ${UDP_PORT}`);
-
-			// emit module status event
-			eventHub.emit('moduleStatus', { 
-				name: 'UDPManager',
-				status: 'operational',
-				data: '',
-			});
 		} catch (error) {
 			// log failure to init
 			logger.error(`Failed to initialize UDP socket: ${error}`);
 
 			// emit error status
-			eventHub.emit('moduleStatus', { 
+			eventHub.emit('moduleStatus', {
 				name: 'UDPManager',
 				status: 'errored',
 				data: `Failed to initialize UDP socket: ${error}`,
 			});
+
+			// signal init attempt is finished (errored) so nothing downstream waits forever
+			eventHub.emit('moduleReady', 'UDPManager');
 		}
 	}
 

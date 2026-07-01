@@ -67,6 +67,9 @@ class MacrosModule {
             // process macros
             this.processMacros();
         }, this.sampleInterval);
+
+        // signal that this module has finished initializing
+        eventHub.emit('moduleReady', 'MacrosModule');
     }
 
 

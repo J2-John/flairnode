@@ -166,6 +166,9 @@ class NetworkModule {
 
     	// log the initialization
     	logger.info('Network module initialization complete!');
+
+    	// signal that this module has finished initializing
+    	eventHub.emit('moduleReady', 'NetworkModule');
     }
 
 

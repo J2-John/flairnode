@@ -38,9 +38,12 @@ class IdManager {
 	}
 
 
-	// initialization function 
+	// initialization function
 	init() {
 		this.loadFromFile();
+
+		// signal that this module has finished initializing
+		eventHub.emit('moduleReady', 'IdManager');
 	}
 
 

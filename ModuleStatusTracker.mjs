@@ -53,6 +53,9 @@ class ModuleStatusTracker {
 
         // run once immediately
         this.processAllModulesStatus();
+
+        // signal that this module has finished initializing
+        eventHub.emit('moduleReady', 'ModuleStatusTracker');
     }
 
 
