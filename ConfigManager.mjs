@@ -170,9 +170,10 @@ class ConfigManager {
 
 
 	// utility function to merge two objects
-	// - If a key is present in A but not in B, it remains unchanged in A. 
+	// - If a key is present in A but not in B, it remains unchanged in A.
 	// - If a key is present in both A and B, the value from B overwrites the value in A.
 	// - If a key is present only in B, it is added to A.
+	// TODO: confirm whether cloud sends partial or complete config objects — if partial, this shallow merge could silently drop nested fields not included in the update.
 	mergeObjects(objA, objB) {
 	    // Iterate over the keys of object B
 	    Object.keys(objB).forEach(function(key) {
