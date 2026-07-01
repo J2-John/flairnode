@@ -298,6 +298,13 @@ class PlaybackController {
 				return;
 			}
 
+			// silently ignore packets from a Sense that isn't paired to this FlairNode
+			// (if no serial is assigned yet, allow packets through unfiltered)
+			const assignedSenseSerial = configManager.getAssignedSenseSerial();
+			if (assignedSenseSerial && object?.SERIAL !== assignedSenseSerial) {
+				return;
+			}
+
 			// validate the packet
 			// this didnt work for some reason as of 8-6-25 so i just cut it out and we'll go without validating
 			// this.validateSenseDataObject(object);

@@ -205,6 +205,11 @@ class ConfigManager {
         return this.config.wall_type ?? null;
 	}
 
+	// assigned sense serial
+	getAssignedSenseSerial() {
+        return this.config.assigned_sense_serial ?? null;
+	}
+
 	// scenes
 	getScenes() {
         return this.config.scenes ?? [];
