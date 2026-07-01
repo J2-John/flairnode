@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Variables
-REPO_URL="https://github.com/DrewJSquared/flairnode"
+REPO_URL="https://github.com/J2-John/flairnode"
 ZIP_FILE="flairnode.zip"
 TMP_DIR="flairnode_tmp"
 
