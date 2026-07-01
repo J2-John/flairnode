@@ -114,6 +114,7 @@ class NetworkModule {
         eventHub.on('systemStatusUpdate', this.systemStatusUpdateListener.bind(this));
         eventHub.on('moduleStatusUpdate', this.moduleStatusUpdateListener.bind(this));
         eventHub.on('macrosStatus', this.macrosStatusListener.bind(this));
+        eventHub.on('diagnosticDump', this.diagnosticDumpListener.bind(this));
 
         // add some initial log message to the queue to show that we are initializing the system
         this.queue.push({
@@ -438,6 +439,12 @@ class NetworkModule {
     // macrosStatusListener for macrosStatus events
     macrosStatusListener(currentMacrosStatus) {
     	this.enqueueData('macrosStatus', currentMacrosStatus);
+    }
+
+
+    // diagnosticDumpListener for diagnosticDump events
+    diagnosticDumpListener(diagnosticDumpData) {
+    	this.enqueueData('diagnosticDump', diagnosticDumpData);
     }
 
 

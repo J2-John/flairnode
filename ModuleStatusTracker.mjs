@@ -192,6 +192,12 @@ class ModuleStatusTracker {
     }
 
 
+    // getModulesSnapshot - return a snapshot copy of all module statuses, used for diagnostic dumps
+    getModulesSnapshot() {
+        return this.modules.map(module => ({ ...module }));
+    }
+
+
     // timeAgo - gives a human readable, single unit of time
     timeAgoStringOnly(timeElapsed) {
         const timeDifference = timeElapsed; // Time elapsed in seconds

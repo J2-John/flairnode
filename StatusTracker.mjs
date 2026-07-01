@@ -113,6 +113,12 @@ class StatusTracker {
     }
 
 
+    // getUptimeString - return the current formatted OS uptime, used for diagnostic dumps
+    getUptimeString() {
+        return this.formatTime(os.uptime());
+    }
+
+
     // helper function to return a usable number of bytes
     formatBytes(bytes, decimals = 2) {
         if (bytes === 0) return '0 Bytes';

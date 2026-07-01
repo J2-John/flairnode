@@ -18,6 +18,8 @@ import Logger from './Logger.mjs';
 const logger = new Logger('MacrosModule');
 
 import configManager from './ConfigManager.mjs';
+import moduleStatusTracker from './ModuleStatusTracker.mjs';
+import statusTracker from './StatusTracker.mjs';
 
 
 
@@ -51,6 +53,10 @@ class MacrosModule {
         this.rebootCommandResults = '';
         this.reloadCommandResults = '';
         this.updateCommandResults = '';
+
+        this.diagnosticDumpQueuedFromServer = false;
+        this.diagnosticDumpCommandSuccess = false;
+        this.diagnosticDumpSnapshot = null;
 
         // emit an event that the macros module is operational
         eventHub.emit('moduleStatus', { 
@@ -94,7 +100,7 @@ class MacrosModule {
 
         // run the two different macro functions as promises
         Promise.race([
-            Promise.all([this.handleReboot(), this.handleReload(), this.handleUpdate()]), // race these two promises 
+            Promise.all([this.handleReboot(), this.handleReload(), this.handleUpdate(), this.handleDiagnosticDump()]), // race these two promises
             timeoutPromise // with the timeout promise
         ])
         .then((results) => {
@@ -112,6 +118,9 @@ class MacrosModule {
 
             // emit macros event, to send completed data back to server
             this.emitMacrosEvent();
+
+            // emit diagnostic dump event, if one was generated this cycle
+            this.emitDiagnosticDumpEvent();
         })
         .catch((error) => {
             // log the error
@@ -126,6 +135,9 @@ class MacrosModule {
 
             // emit macros event back to server regardless
             this.emitMacrosEvent();
+
+            // emit diagnostic dump event back to server regardless, if one was generated this cycle
+            this.emitDiagnosticDumpEvent();
         });
     }
 
@@ -135,6 +147,7 @@ class MacrosModule {
         this.rebootQueuedFromServer = configManager.getReboot();
         this.reloadQueuedFromServer = configManager.getReload();
         this.updateQueuedFromServer = configManager.getUpdate();
+        this.diagnosticDumpQueuedFromServer = configManager.getDiagnosticDump();
     }
 
 
@@ -420,6 +433,46 @@ class MacrosModule {
 
 
 
+    // handle diagnostic dump command
+    handleDiagnosticDump() {
+        // return a promise
+        return new Promise((resolve, reject) => {
+
+            // check if a diagnostic dump has been queued from the server
+            if (this.diagnosticDumpQueuedFromServer == true) {
+
+                // build the diagnostic snapshot: config summary, module statuses, OS uptime, and recent errors
+                this.diagnosticDumpSnapshot = {
+                    timestamp: new Date(),
+                    config: configManager.getConfigSummary(),
+                    moduleStatuses: moduleStatusTracker.getModulesSnapshot(),
+                    uptime: statusTracker.getUptimeString(),
+                    recentErrors: Logger.getRecentErrors(),
+                };
+
+                this.diagnosticDumpCommandSuccess = true;
+
+                // clear the flag locally (in-memory only) so it only fires once per cloud request
+                configManager.clearDiagnosticDump();
+
+                // log that we generated a diagnostic dump
+                logger.info('Diagnostic dump queued from server, snapshot generated and flag cleared locally.');
+
+                // resolve with the snapshot
+                resolve(this.diagnosticDumpSnapshot);
+            } else {
+                // otherwise, no diagnostic dump needed, so reset local state
+                this.diagnosticDumpCommandSuccess = false;
+                this.diagnosticDumpSnapshot = null;
+
+                // resolve with a n/a message
+                resolve('No diagnostic dump queued from server.');
+            }
+        });
+    }
+
+
+
     async restartPm2Async() {
         // Command to async restart PM2 after 30 sec
         const command = 'sleep 30; pm2 restart all';
@@ -474,6 +527,22 @@ class MacrosModule {
 
             // emit a network event to let the server know about the macros statuses
             eventHub.emit('macrosStatus', macrosData);
+        }
+    }
+
+
+    // emit a diagnosticDump event to the system, if one was generated this cycle
+    emitDiagnosticDumpEvent() {
+        // only send if a diagnostic dump was actually queued and generated this cycle
+        if (this.diagnosticDumpQueuedFromServer && this.diagnosticDumpSnapshot) {
+
+            // log
+            if (configManager.checkLogLevel('detail')) {
+                logger.info(`Diagnostic dump was queued by the server. Sending diagnostic dump event with snapshot data back to server...`);
+            }
+
+            // emit a network event to let the server know about the diagnostic dump snapshot
+            eventHub.emit('diagnosticDump', this.diagnosticDumpSnapshot);
         }
     }
 }

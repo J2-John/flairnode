@@ -291,6 +291,22 @@ class ConfigManager {
 		return this.config?.update ?? false;
 	}
 
+	// diagnostic dump flag
+	getDiagnosticDump() {
+		return this.config?.diagnosticDump ?? false;
+	}
+
+	// clear the diagnostic dump flag locally (in-memory only, not persisted to file)
+	// so a triggered dump only fires once per cloud request
+	clearDiagnosticDump() {
+		this.config.diagnosticDump = false;
+	}
+
+	// config summary - shallow copy of the full config, used for diagnostic dumps
+	getConfigSummary() {
+		return { ...this.config };
+	}
+
 
 
 

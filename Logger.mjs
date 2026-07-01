@@ -17,6 +17,9 @@ const CLEANUP_INTERVAL = 10000; // interval to clean up old log entries in ms
 const SUPER_HIGH_DUPLICATE_COUNT = 250; // # of duplicates before rate of showing duplicates scales back
 const SUPER_HIGH_DUPLICATE_RATE = 60000; // rate at which super high duplicate counts are shown
 
+const RECENT_ERRORS_LIMIT = 20; // max number of recent error logs to retain for diagnostic dumps
+const recentErrors = []; // centralized buffer of recent error logs across all Logger instances
+
 
 // create the class
 class Logger {
@@ -147,6 +150,20 @@ class Logger {
 			message: message,
 		};
 
+		// track error logs in the centralized recent errors buffer, used for diagnostic dumps
+		if (logEntry.type === 'error') {
+			recentErrors.push({
+				timestamp: logEntry.timestamp,
+				module: logEntry.module,
+				message: logEntry.message,
+			});
+
+			// cap the buffer, dropping the oldest entries first
+			if (recentErrors.length > RECENT_ERRORS_LIMIT) {
+				recentErrors.splice(0, recentErrors.length - RECENT_ERRORS_LIMIT);
+			}
+		}
+
 		// now log the new message in console
 		this.printLogToConsole(logEntry);
 
@@ -226,6 +243,12 @@ class Logger {
 	// provide a method for error logs
 	error(message) {
 		this.log('ERROR', message);
+	}
+
+
+	// getRecentErrors - static method to retrieve a copy of the centralized recent errors buffer, used for diagnostic dumps
+	static getRecentErrors() {
+		return [...recentErrors];
 	}
 }
 
