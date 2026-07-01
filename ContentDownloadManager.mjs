@@ -21,7 +21,7 @@ import configManager from './ConfigManager.mjs';
 
 
 // variables
-const USE_LOCALHOST = true;  // for development only
+const USE_LOCALHOST = false;  // for development only
 const LAPTOP_MODE = (process.platform === 'darwin');
 
 const CONTENT_DOWNLOAD_URL = (USE_LOCALHOST && LAPTOP_MODE)
@@ -30,6 +30,7 @@ const CONTENT_DOWNLOAD_URL = (USE_LOCALHOST && LAPTOP_MODE)
 
 const OUTPUT_DIR = path.resolve('./content');
 const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;  // 5 minutes
+// TODO: known boot delay, revisit once Pi 5 startup timing is validated
 const INITIAL_SCAN_DELAY_MS = 20000;  // wait 20 seconds before first scan
 const MAX_RETRY_ATTEMPTS = 1; // retry set to 1 because this thing is running pretty often anyway
 
