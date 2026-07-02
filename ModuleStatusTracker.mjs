@@ -16,7 +16,7 @@ import configManager from './ConfigManager.mjs';
 
 // variables
 const SAMPLE_INTERVAL = 3000;  // interval for how often to check module statuses (should be 15000ms)
-const SEND_TO_NETWORK_INTERVAL = 15000; // interval for how often to send module statuses to the server
+const SEND_TO_NETWORK_INTERVAL = 30000; // interval for how often to send module statuses to the server
 const UNRESPONSIVE_THRESHOLD = 35;  // number of seconds before considering a module unresponsive
 
 

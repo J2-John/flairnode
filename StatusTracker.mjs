@@ -20,7 +20,7 @@ import configManager from './ConfigManager.mjs';
 
 
 // variables
-const SAMPLE_INTERVAL = 15000;  // interval for how often to check system status (should be 15000ms)
+const SAMPLE_INTERVAL = 30000;  // interval for how often to check system status (should be 30000ms)
 
 
 

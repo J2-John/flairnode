@@ -27,7 +27,8 @@ const API_URL = 'https://flairled.com/api/v1/flair-node/sync';  // URL to hit wi
 const USE_LOCALHOST = false;  // set to true to use the flairnode.test API_URL instead (FOR DEVELOPMENT ONLY)
 const LAPTOP_MODE = (process.platform == 'darwin');  // checks whether we're running on macos (laptop mode) or not
 
-const PING_INTERVAL = 1000;  // interval in ms to ping the server (should be 1000ms)
+const PING_INTERVAL = 10000;  // interval in ms to ping the server (should be 10000ms)
+const STATUS_PAYLOAD_CYCLE_INTERVAL = 3;  // only include systemStatus/moduleStatus payloads every Nth sync cycle
 const MAX_ERROR_COUNT = 5; // max number of failed requests before payload will be saved to missed messages queue
 const NETWORK_REQUEST_TIMEOUT_MS = 15000;  // number of milliseconds to wait before considering the last request to have timed out
 const OFFLINE_THRESHOLD_MS = 35000;  // milliseconds since the last successful response before we consider the connection offline
@@ -88,9 +89,12 @@ class NetworkModule {
 		// and that the device was power cycled or something
 
 
-    	// keep a counter to increment the sequenceNumber for each log entry packet. 
-    	// the sequence number helps keep up with the order of logs for 
+    	// keep a counter to increment the sequenceNumber for each log entry packet.
+    	// the sequence number helps keep up with the order of logs for
     	this.logSequenceNumberCounter = 5;
+
+    	// counts each sync cycle that actually performs a send, used to gate low-frequency diagnostic payloads
+    	this.syncCycleCounter = 0;
     }
 
 
@@ -229,8 +233,18 @@ class NetworkModule {
 	  	this.requestInProgress = true;
 	  	this.lastRequestTimestamp = now;
 
+    	// increment the sync cycle counter and determine whether this cycle should include diagnostic status payloads
+    	this.syncCycleCounter++;
+    	const includeStatusPayloadsThisCycle = (this.syncCycleCounter % STATUS_PAYLOAD_CYCLE_INTERVAL === 0);
+
     	// grab the entire current queue into a payload for this particular request (this clears the queue)
-    	const payload = this.queue.splice(0, this.queue.length);
+    	let payload = this.queue.splice(0, this.queue.length);
+
+    	// systemStatus and moduleStatus are diagnostic snapshots that don't need to go out every sync cycle.
+    	// on cycles where they're not due, drop them from this payload rather than holding them for later
+    	if (!includeStatusPayloadsThisCycle) {
+    		payload = payload.filter(item => item.type !== 'systemStatus' && item.type !== 'moduleStatus');
+    	}
     	// console.log('PAYLOAD', payload);
 
     	// if necesary, add missed messages to the queue
