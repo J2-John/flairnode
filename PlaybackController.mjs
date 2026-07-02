@@ -40,6 +40,10 @@ const CONTENT_DOWNLOAD_URL = (USE_LOCALHOST && LAPTOP_MODE)
 
 const OUTPUT_DIR = path.join(__dirname, 'content');
 
+// used only when wall type/canvas is missing — mirrors render.html's fixed body size
+const FALLBACK_CANVAS_WIDTH = 1920;
+const FALLBACK_CANVAS_HEIGHT = 1080;
+
 
 
 // Define the PlaybackController class to handle playback logic
@@ -231,25 +235,49 @@ class PlaybackController {
 
 
 
+	// getCanvasDimensions - bounding box of all zones in the wall type's canvas,
+	// same calculation as RenderSceneWithPuppeteer.php's canvasDimensions()
+	getCanvasDimensions() {
+		const zones = configManager.getWallType()?.canvas?.zones;
+
+		if (!Array.isArray(zones) || zones.length === 0) {
+			return { width: FALLBACK_CANVAS_WIDTH, height: FALLBACK_CANVAS_HEIGHT };
+		}
+
+		let width = 0;
+		let height = 0;
+
+		for (const zone of zones) {
+			width = Math.max(width, (zone.x ?? 0) + (zone.width ?? 0));
+			height = Math.max(height, (zone.y ?? 0) + (zone.height ?? 0));
+		}
+
+		// dimensions must be even, same constraint as the PHP side
+		if (width % 2 !== 0) width += 1;
+		if (height % 2 !== 0) height += 1;
+
+		return { width, height };
+	}
+
+
 	// play scene by id - play a scene
 	playSceneById(sceneId, repeat = true, clearElse = false, z_index = 17) {
 		try {
 			const scenes = configManager.getScenes();
-			const content = configManager.getContent();
 			const scene = scenes.find(s => s.id === sceneId);
 
-			if (!scene || !Array.isArray(scene.elements)) {
-				logger.warn(`Scene ${sceneId} is missing or malformed.`);
+			if (!scene || !(scene.render_version > 0)) {
+				logger.warn(`Scene ${sceneId} has not been rendered yet (render_version: ${scene?.render_version}).`);
 				return;
 			}
 
 			if (clearElse) {
-				const currentDomIds = scene.elements.map(e => `${scene.id}-${e.layer}-${scene.render_version}`);
+				const currentDomIds = [`${scene.id}-${scene.render_version}`];
 
 				// include overrides (z_index < 17) — we'll assume those are the active ones
 				const overrideSceneIds = configManager.getScenes()
 					.filter(s => s.id !== sceneId) // don't re-include the current scene
-					.flatMap(s => s.elements.map(e => `${s.id}-${e.layer}-${s.render_version}`));
+					.map(s => `${s.id}-${s.render_version}`);
 
 				const combinedDomIds = [...currentDomIds, ...overrideSceneIds];
 
@@ -259,23 +287,18 @@ class PlaybackController {
 			}
 
 
-			scene.elements.forEach((element) => {
-				const contentItem = content.find(c => c.id === element.content_id);
-				if (!contentItem) return;
+			const { width: canvasWidth, height: canvasHeight } = this.getCanvasDimensions();
 
-				const extension = (contentItem.type === 'image') ? 'jpg' : 'mp4';
-
-				this.safeSend('assert_video_is_playing', {
-					file: `/content/${scene.id}-${element.layer}-${scene.render_version}.${extension}`,
-					dom_id: `${scene.id}-${element.layer}-${scene.render_version}`,
-					x: element.x,
-					y: element.y,
-					width: element.width,
-					height: element.height,
-					type: contentItem.type,
-					loop: repeat,
-					z_index: z_index,
-				});
+			this.safeSend('assert_video_is_playing', {
+				file: `/content/${scene.id}-${scene.render_version}.mp4`,
+				dom_id: `${scene.id}-${scene.render_version}`,
+				x: 0,
+				y: 0,
+				width: canvasWidth,
+				height: canvasHeight,
+				type: 'video',
+				loop: repeat,
+				z_index: z_index,
 			});
 		} catch (err) {
 			logger.error(`Failed to play scene ${sceneId}: ${err.message}`);

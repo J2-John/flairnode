@@ -82,43 +82,35 @@ class ContentDownloadManager {
 			// console.log(`Checking for new content to be downloaded at ${ new Date().toLocaleTimeString() }`);
 
 			const scenes = configManager.getScenes();
-			const contentList = configManager.getContent();
 
 			if (!fs.existsSync(OUTPUT_DIR)) {
 				fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 			}
 
 			for (const scene of scenes ?? []) {
-				if (!scene?.elements || scene.elements.length === 0) continue;
+				if (!scene || !(scene.render_version > 0)) continue;
 
-				for (const element of scene.elements) {
-					try {
-						const contentItem = contentList.find(c => c.id === element?.content_id);
-						if (!contentItem) continue;
+				try {
+					const filename = `${scene.id}-${scene.render_version}.mp4`;
+					const filePath = path.join(OUTPUT_DIR, filename);
+					const downloadUrl = `${CONTENT_DOWNLOAD_URL}${scene.id}/${filename}`;
 
-						const ext = contentItem.type === 'video' ? 'mp4' : 'jpg';
-						const filename = `${scene.id}-${element.layer}-${scene.render_version}.${ext}`;
-						const filePath = path.join(OUTPUT_DIR, filename);
-						const downloadUrl = `${CONTENT_DOWNLOAD_URL}${scene.id}/${filename}`;
+					const alreadyQueued = this.queue.find(q => q.filename === filename);
+					const currentlyDownloading = this.activeDownload?.filename === filename;
 
-						const alreadyQueued = this.queue.find(q => q.filename === filename);
-						const currentlyDownloading = this.activeDownload?.filename === filename;
-
-						if (!fs.existsSync(filePath) && !alreadyQueued && !currentlyDownloading) {
-							this.queue.push({
-								sceneId: scene.id,
-								layer: element.layer,
-								renderVersion: scene.render_version,
-								contentType: contentItem.type,
-								filename: filename,
-								url: downloadUrl,
-								path: filePath,
-								attemptNumber: 1
-							});
-						}
-					} catch (err) {
-						logger.error(`Error evaluating content for scene ${scene?.id}: ${err.message}`);
+					if (!fs.existsSync(filePath) && !alreadyQueued && !currentlyDownloading) {
+						this.queue.push({
+							sceneId: scene.id,
+							renderVersion: scene.render_version,
+							contentType: 'video',
+							filename: filename,
+							url: downloadUrl,
+							path: filePath,
+							attemptNumber: 1
+						});
 					}
+				} catch (err) {
+					logger.error(`Error evaluating content for scene ${scene?.id}: ${err.message}`);
 				}
 			}
 
@@ -230,7 +222,7 @@ class ContentDownloadManager {
 
 			for (const file of filesInContent) {
 				try {
-					const match = file.match(/(\d+)-\d+-(\d+)\.(jpg|mp4)$/);
+					const match = file.match(/(\d+)-(\d+)\.mp4$/);
 					if (!match) continue;
 
 					const sceneId = parseInt(match[1]);
