@@ -29,6 +29,8 @@ const LAPTOP_MODE = (process.platform == 'darwin');  // checks whether we're run
 
 const PING_INTERVAL = 10000;  // interval in ms to ping the server (should be 10000ms)
 const STATUS_PAYLOAD_CYCLE_INTERVAL = 3;  // only include systemStatus/moduleStatus payloads every Nth sync cycle
+const MAX_LOGS_PER_QUEUE = 20;  // max number of 'log' type entries allowed in the queue at once (rolling window, oldest dropped)
+const MAX_LOGS_PER_SYNC_CYCLE = 20;  // max number of 'log' type entries sent in a single sync cycle's payload
 const MAX_ERROR_COUNT = 5; // max number of failed requests before payload will be saved to missed messages queue
 const NETWORK_REQUEST_TIMEOUT_MS = 15000;  // number of milliseconds to wait before considering the last request to have timed out
 const OFFLINE_THRESHOLD_MS = 35000;  // milliseconds since the last successful response before we consider the connection offline
@@ -245,6 +247,19 @@ class NetworkModule {
     	if (!includeStatusPayloadsThisCycle) {
     		payload = payload.filter(item => item.type !== 'systemStatus' && item.type !== 'moduleStatus');
     	}
+
+    	// cap how many log entries go out in a single sync cycle; only 'log' type entries are capped,
+    	// all other payload types (macrosStatus, systemStatus, moduleStatus, diagnosticDump, etc.) pass through uncapped.
+    	// excess logs beyond the cap are dropped rather than deferred to the next cycle
+    	let logCountInPayload = 0;
+    	payload = payload.filter(item => {
+    		if (item.type !== 'log') {
+    			return true;
+    		}
+
+    		logCountInPayload++;
+    		return logCountInPayload <= MAX_LOGS_PER_SYNC_CYCLE;
+    	});
     	// console.log('PAYLOAD', payload);
 
     	// if necesary, add missed messages to the queue
@@ -412,6 +427,19 @@ class NetworkModule {
         	timestamp: new Date(),
         	data: data,
         });
+
+        // logs are high-volume and low-value individually, so cap how many can sit in the queue at once.
+        // if adding this entry pushed us over the limit, drop the oldest log entry to make room,
+        // keeping a rolling window of the most recent MAX_LOGS_PER_QUEUE logs. non-log entries are unaffected.
+        if (type === 'log') {
+        	let logCountInQueue = this.queue.filter(item => item.type === 'log').length;
+
+        	while (logCountInQueue > MAX_LOGS_PER_QUEUE) {
+        		const oldestLogIndex = this.queue.findIndex(item => item.type === 'log');
+        		this.queue.splice(oldestLogIndex, 1);
+        		logCountInQueue--;
+        	}
+        }
     }
 
 
