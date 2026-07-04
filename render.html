@@ -57,6 +57,9 @@
 	<!-- rendered videos layout -->
 	<div id="renderedVideosLayout" style="position: relative; width: 100%; height: 100%;"></div>
 
+	<!-- offline indicator -->
+	<img id="offline-indicator" src="./Assets/offline-indicator.png" style="display: none; position: absolute; top: 0; left: 0; width: 32px; height: 32px; z-index: 99999;">
+
 
 	<script>
 		console.log(`---------------------------
@@ -76,6 +79,7 @@ System initializing...
 		// DOM elements
 		const bootScreen = document.getElementById('bootScreen');
 		const errorScreen = document.getElementById('errorScreen');
+		const offlineIndicator = document.getElementById('offline-indicator');
 
 
 		// === Boot sequence (1 s per color, fully crash-safe) ===
@@ -282,6 +286,14 @@ System initializing...
 					hideSerialNumberScreen();
 					hideWallTypesLayout();
 					clearVideosExceptDomIds(data);
+					break;
+
+				case 'show_offline_indicator':
+					showOfflineIndicator();
+					break;
+
+				case 'hide_offline_indicator':
+					hideOfflineIndicator();
 					break;
 
 
@@ -652,6 +664,16 @@ System initializing...
 
 
 
+
+
+		// === Offline Indicator ===
+		function showOfflineIndicator() {
+			offlineIndicator.style.display = 'block';
+		}
+
+		function hideOfflineIndicator() {
+			offlineIndicator.style.display = 'none';
+		}
 
 
 		// === Fallback/Error Handling ===

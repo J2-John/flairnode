@@ -100,6 +100,17 @@ class PlaybackController {
 			this.renderClientIsReady = false;
 		});
 
+		// handle NetworkModule online/offline status changes -> show/hide the offline indicator overlay
+		eventHub.on('moduleStatus', (status) => {
+			if (status?.name !== 'NetworkModule') return;
+
+			if (status.status === 'offline') {
+				this.safeSend('show_offline_indicator');
+			} else if (status.status === 'online') {
+				this.safeSend('hide_offline_indicator');
+			}
+		});
+
 		// handle contnet ready
 		// eventHub.on('allContentReady', () => {
 		// 	this.contentIsReady = true;
