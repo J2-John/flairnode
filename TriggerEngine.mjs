@@ -5,8 +5,9 @@
 
 // this module creates a single instance of the TriggerEngine javascript object,
 // which owns all trigger STATE and DECISION logic: edge detection on Sense port
-// data, per-port fire/expiry timing, visibility resolution (priority + overlap +
-// cap), and the CPU load governor. It never touches UDPManager, RenderSocketClient,
+// data, per-port fire/expiry timing, visibility resolution (priority + cap —
+// overlapping triggers STACK, there is no conflict/overlap check), and the CPU
+// load governor. It never touches UDPManager, RenderSocketClient,
 // or the render client directly — PlaybackController already owns the validated/
 // paired Sense packet pipeline (handleNewSenseData) and the render-client
 // transport (safeSend), so this module is fed a pre-validated port-state array by
@@ -20,7 +21,6 @@
 import os from 'os';
 import eventHub from './EventHub.mjs';
 import configManager from './ConfigManager.mjs';
-import { getCanvasDimensions } from './CanvasDimensions.mjs';
 
 import Logger from './Logger.mjs';
 const logger = new Logger('TriggerEngine');
@@ -43,6 +43,17 @@ const EXPIRY_CHECK_INTERVAL_MS = 1000;  // how often to sweep for expired trigge
 // "fully busy across all cores"), not measured. Revisit all five once
 // phase 4 has real bench numbers for sustained decode load under N visible
 // triggers.
+//
+// "Visible" in this engine means accepted-and-rendered, not necessarily
+// seen. Overlapping triggers stack (no conflict/overlap check), so an
+// accepted trigger can be fully covered on screen by another accepted
+// trigger stacked above it (e.g. a full-canvas trigger on a higher port)
+// — it is still actively decoding and rendering underneath, consuming a
+// real decode stream, even though nothing of it is visible on the wall.
+// The engine does not attempt to detect or optimize away that visual
+// redundancy; VISIBLE_CAP is the deliberate budget on how many concurrent
+// decode streams this device carries, independent of whether every one
+// of them is actually contributing pixels.
 const CPU_SAMPLE_INTERVAL_MS = 5000;       // calibrate in phase 4 bench testing
 const CPU_LOAD_THRESHOLD_HIGH = 3.5;       // calibrate in phase 4 bench testing
 const CPU_LOAD_THRESHOLD_LOW = 2.0;        // calibrate in phase 4 bench testing
@@ -64,8 +75,11 @@ class TriggerEngine {
 		this.portState = {};
 
 		// the set of ports currently ACCEPTED as visible — a subset of
-		// Object.keys(this.portState). Everything active-but-not-in-this-set
-		// stays hidden but keeps counting down (locked ruleset §4).
+		// Object.keys(this.portState), the top currentVisibleCap ports by
+		// port number descending. Everything active-but-not-in-this-set was
+		// shed by the cap/governor, and stays hidden (no video asserted)
+		// but keeps counting down. Overlapping triggers stack — there is no
+		// other way for an active trigger to be excluded from this set.
 		this.visiblePorts = new Set();
 
 		// last-seen 19-element Sense port array, for inactive->active edge
@@ -281,33 +295,29 @@ class TriggerEngine {
 	// ==================== VISIBILITY RESOLUTION ====================
 
 	// resolveVisibility - recomputed from scratch on every fire, expiry,
-	// AND governor cap change (locked ruleset §4 says "every fire/expiry";
-	// a cap change is this module's own necessary extension of that same
-	// principle — leaving stale visibility standing after the cap itself
-	// changed would defeat the governor). Iterates active ports HIGHEST
-	// PORT FIRST (highest priority), accepting a port if its overlay rect
-	// doesn't overlap any already-accepted rect AND the cap isn't full.
+	// AND governor cap change (recompute on every fire/expiry is the
+	// locked ruleset; a cap change is this module's own necessary
+	// extension of that same principle — leaving stale visibility standing
+	// after the cap itself changed would defeat the governor).
+	//
+	// Product correction: overlapping triggers STACK — there is no
+	// conflict/overlap check. Every active trigger is visible, up to
+	// currentVisibleCap, selected by port descending (higher port = higher
+	// priority = accepted first). Overlay metadata (overlay_x/y/width/
+	// height) is NOT read here at all; it remains purely positioning data,
+	// applied only when a video is actually asserted (see
+	// PlaybackController.playSceneById). Z-order is still by port —
+	// zIndexForPort()'s existing `-port` (cssZ = 100 + port in render.html)
+	// already stacks higher ports above lower ones, so priority order and
+	// on-screen stacking order are the same thing; nothing new was needed
+	// there.
 	resolveVisibility() {
 		try {
 			const activePorts = Object.keys(this.portState)
 				.map(Number)
 				.sort((a, b) => b - a);  // descending: higher port = higher priority
 
-			const accepted = [];
-			const acceptedRects = [];
-
-			for (const port of activePorts) {
-				if (accepted.length >= this.currentVisibleCap) break;
-
-				const rect = this.getOverlayRect(this.portState[port].sceneId);
-				const overlaps = acceptedRects.some(r => this.rectsOverlap(rect, r));
-
-				if (!overlaps) {
-					accepted.push(port);
-					acceptedRects.push(rect);
-				}
-			}
-
+			const accepted = activePorts.slice(0, this.currentVisibleCap);
 			const acceptedSet = new Set(accepted);
 			const previouslyVisible = this.visiblePorts;
 
@@ -318,7 +328,7 @@ class TriggerEngine {
 				}
 			}
 
-			// no longer accepted (expired OR lost the priority/overlap contest) -> hide
+			// no longer accepted (expired OR shed by the cap/governor) -> hide
 			for (const port of previouslyVisible) {
 				if (!acceptedSet.has(port)) {
 					this.hideTrigger(port);
@@ -329,47 +339,6 @@ class TriggerEngine {
 		} catch (error) {
 			logger.error(`Error resolving trigger visibility: ${error.message}`);
 		}
-	}
-
-
-	// getOverlayRect - a scene's overlay rect in packed-canvas pixels, or
-	// the full-canvas rect when metadata is null (locked ruleset §4: "null
-	// metadata = full-canvas rect (conflicts with everything)"). A scene_id
-	// that doesn't resolve to a known scene at all gets the SAME
-	// conservative full-canvas treatment — we can't know its real
-	// footprint, so assume the worst rather than let it slip through the
-	// overlap check unchecked.
-	getOverlayRect(sceneId) {
-		const scene = configManager.getScenes()?.find(s => s.id === sceneId);
-		const { width, height } = getCanvasDimensions();
-
-		if (!scene) {
-			return { x: 0, y: 0, width, height };
-		}
-
-		const hasOverlay = scene.overlay_x != null && scene.overlay_y != null
-			&& scene.overlay_width != null && scene.overlay_height != null;
-
-		if (!hasOverlay) {
-			return { x: 0, y: 0, width, height };
-		}
-
-		return {
-			x: scene.overlay_x,
-			y: scene.overlay_y,
-			width: scene.overlay_width,
-			height: scene.overlay_height,
-		};
-	}
-
-
-	// rectsOverlap - standard AABB overlap test. Touching edges (a.x + a.width
-	// === b.x) do NOT count as overlapping — only genuine area intersection does.
-	rectsOverlap(a, b) {
-		if (!a || !b) return true;  // defensive: treat a missing rect as full-canvas
-
-		return a.x < b.x + b.width && a.x + a.width > b.x
-			&& a.y < b.y + b.height && a.y + a.height > b.y;
 	}
 
 
