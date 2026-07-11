@@ -17,16 +17,12 @@ import Logger from './Logger.mjs';
 const logger = new Logger('ContentDownloadManager');
 
 import configManager from './ConfigManager.mjs';
+import environment from './EnvironmentConfig.mjs';
 
 
 
 // variables
-const USE_LOCALHOST = false;  // for development only
-const LAPTOP_MODE = (process.platform === 'darwin');
-
-const CONTENT_DOWNLOAD_URL = (USE_LOCALHOST && LAPTOP_MODE)
-	? 'http://flairled.test/storage/scene_renders/'
-	: 'https://flairled.com/storage/scene_renders/';
+const CONTENT_DOWNLOAD_URL = `${environment.BASE_HOST}/storage/scene_renders/`;
 
 const OUTPUT_DIR = path.resolve('./content');
 const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;  // 5 minutes

@@ -18,14 +18,12 @@ const logger = new Logger('NetworkModule');
 
 import configManager from './ConfigManager.mjs';
 import idManager from './IdManager.mjs';
+import environment from './EnvironmentConfig.mjs';
 
 
 
 // variables
-const API_URL = 'https://flairled.com/api/v1/flair-node/sync';  // URL to hit with a POST request
-
-const USE_LOCALHOST = false;  // set to true to use the flairnode.test API_URL instead (FOR DEVELOPMENT ONLY)
-const LAPTOP_MODE = (process.platform == 'darwin');  // checks whether we're running on macos (laptop mode) or not
+const API_URL = `${environment.BASE_HOST}/api/v1/flair-node/sync`;  // URL to hit with a POST request
 
 const PING_INTERVAL = 10000;  // interval in ms to ping the server (should be 10000ms)
 const STATUS_PAYLOAD_CYCLE_INTERVAL = 3;  // only include systemStatus/moduleStatus payloads every Nth sync cycle
@@ -50,15 +48,9 @@ class NetworkModule {
         // Initialize the request interval
         this.interval = interval;
 
-        // init URL endpoint to API_URL
+        // init URL endpoint to API_URL (derived from the shared EnvironmentConfig BASE_HOST,
+        // so this can never point at a different cloud than ContentDownloadManager)
         this.url = API_URL;
-
-        // check if we're on laptop mode and USE_LOCALHOST is true, if so then use the flairnode.test API url.
-        // this is added to make absolutely sure that we only use the flairnode.test API URL if we're running on
-        // macOS laptop for development, and to ensure that production devices can NEVER use this url
-        if (USE_LOCALHOST && LAPTOP_MODE) {
-        	this.url = 'http://flairled.test/api/v1/flair-node/sync';
-        }
 
         // Initialize queue of objects that are pending to be sent to the server
         // these objects might be logs, current status objects, data from external devices, etc.

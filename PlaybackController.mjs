@@ -31,13 +31,6 @@ const __dirname = dirname(__filename);
 // variables
 const INTERVAL_MS = 1000;  // how often to attempt processPlayback
 
-const USE_LOCALHOST = false;  // for development only
-const LAPTOP_MODE = (process.platform === 'darwin');
-
-const CONTENT_DOWNLOAD_URL = (USE_LOCALHOST && LAPTOP_MODE)
-	? 'http://flairled.test/storage/scene_renders/'
-	: 'https://flairled.com/storage/scene_renders/';
-
 const OUTPUT_DIR = path.join(__dirname, 'content');
 
 // used only when wall type/canvas is missing — mirrors render.html's fixed body size
