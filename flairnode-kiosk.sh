@@ -14,6 +14,13 @@
 # the autostart entry already exists so installing it is a no-op -> Chromium
 # launches. Net effect: a power-cycled unit comes back playing with zero
 # human touch, after the one-time manual run that installs the entry.
+#
+# If you see "unrecognized flag" / unknown-flag errors from V8 at launch,
+# they are not coming from the flag list below — this script has been
+# verified against current Chromium source. Look at OS-level Chromium
+# config on that unit instead (e.g. a system flags file such as
+# /etc/chromium.d/ or a policy file), which can inject additional flags
+# this script never passes.
 
 AUTOSTART_DIR="$HOME/.config/autostart"
 AUTOSTART_FILE="$AUTOSTART_DIR/flairnode-kiosk.desktop"
@@ -35,19 +42,21 @@ fi
 echo "Starting Chromium test kiosk..."
 sleep 3;
 
-chromium \
-        --kiosk "file://$HOME/flairnode/render.html" \
-        --noerrdialogs \
-        --disable-infobars \
-        --disable-session-crashed-bubble \
-        --no-first-run \
-        --disable-features=PointerLock \
-        --disable-translate \
-        --disable-component-update \
-        --disable-background-networking \
-        --disable-sync \
-        --metrics-recording-only \
-        --no-service-autorun \
-        --autoplay-policy=no-user-gesture-required \
-        --password-store=basic \
+CHROMIUM_FLAGS=(
+        --kiosk "file://$HOME/flairnode/render.html"
+        --noerrdialogs
+        --disable-session-crashed-bubble
+        --no-first-run
+        # --disable-features=PointerLock: unverified feature name, likely silent
+        # no-op - kept because removal gains nothing and it may guard older builds.
+        --disable-features=PointerLock
+        --disable-component-update
+        --disable-background-networking
+        --disable-sync
+        --metrics-recording-only
+        --autoplay-policy=no-user-gesture-required
+        --password-store=basic
         --user-data-dir="$HOME/.flair-chrome-test"
+)
+
+chromium "${CHROMIUM_FLAGS[@]}"
