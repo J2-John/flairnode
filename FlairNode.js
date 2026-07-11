@@ -22,6 +22,7 @@ import udpManager from './UDPManager.mjs';
 import renderSocketClient from './RenderSocketClient.mjs';
 import playbackController from './PlaybackController.mjs';
 import contentDownloadManager from './ContentDownloadManager.mjs';
+import triggerEngine from './TriggerEngine.mjs';
 
 
 
@@ -79,12 +80,13 @@ whenReady(['NetworkModule'], () => {
 whenReady(['NetworkModule', 'RenderSocketClient'], () => {
 	playbackController.init();
 	macrosModule.init();
+	triggerEngine.init();
 });
 
 
 // initialization sequence complete!
 whenReady(
-	['StatusTracker', 'ModuleStatusTracker', 'UDPManager', 'ContentDownloadManager', 'PlaybackController', 'MacrosModule'],
+	['StatusTracker', 'ModuleStatusTracker', 'UDPManager', 'ContentDownloadManager', 'PlaybackController', 'MacrosModule', 'TriggerEngine'],
 	() => {
 		logger.info('Device initialization sequence complete!');
 	}

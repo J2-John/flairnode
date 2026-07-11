@@ -13,6 +13,8 @@ import eventHub from './EventHub.mjs';
 import configManager from './ConfigManager.mjs';
 import RenderSocketClient from './RenderSocketClient.mjs';
 import idManager from './IdManager.mjs';
+import triggerEngine from './TriggerEngine.mjs';
+import { getCanvasDimensions as computeCanvasDimensions } from './CanvasDimensions.mjs';
 
 import Logger from './Logger.mjs';
 const logger = new Logger('PlaybackController');
@@ -32,10 +34,6 @@ const __dirname = dirname(__filename);
 const INTERVAL_MS = 1000;  // how often to attempt processPlayback
 
 const OUTPUT_DIR = path.join(__dirname, 'content');
-
-// used only when wall type/canvas is missing — mirrors render.html's fixed body size
-const FALLBACK_CANVAS_WIDTH = 1920;
-const FALLBACK_CANVAS_HEIGHT = 1080;
 
 
 
@@ -57,6 +55,7 @@ class PlaybackController {
 		// bind in the constructor
 		this.handleNewSenseData = this.handleNewSenseData.bind(this);
 		this.playSceneById = this.playSceneById.bind(this);
+		this.clearVideoByDomId = this.clearVideoByDomId.bind(this);
 	}
 
 
@@ -79,6 +78,18 @@ class PlaybackController {
 
 		// handle incoming sense data
 		eventHub.on('receivedUDP', this.handleNewSenseData);
+
+		// handle trigger show/hide requests from TriggerEngine (one-way:
+		// PlaybackController -> TriggerEngine calls processSenseData()
+		// directly; TriggerEngine -> PlaybackController is eventHub-only,
+		// so neither module imports the other in a cycle)
+		eventHub.on('triggerShow', (data) => {
+			this.playSceneById(data.sceneId, true, false, data.zIndex, data.domId);
+		});
+
+		eventHub.on('triggerHide', (data) => {
+			this.clearVideoByDomId(data.domId);
+		});
 
 		// handle render client connected
 		eventHub.on('renderClientConnected', () => {
@@ -240,32 +251,20 @@ class PlaybackController {
 
 
 	// getCanvasDimensions - bounding box of all zones in the wall type's canvas,
-	// same calculation as RenderSceneWithPuppeteer.php's canvasDimensions()
+	// same calculation as RenderSceneWithPuppeteer.php's canvasDimensions().
+	// Thin wrapper: the actual calculation lives in CanvasDimensions.mjs so
+	// TriggerEngine can share it without importing PlaybackController.
 	getCanvasDimensions() {
-		const zones = configManager.getWallType()?.canvas?.zones;
-
-		if (!Array.isArray(zones) || zones.length === 0) {
-			return { width: FALLBACK_CANVAS_WIDTH, height: FALLBACK_CANVAS_HEIGHT };
-		}
-
-		let width = 0;
-		let height = 0;
-
-		for (const zone of zones) {
-			width = Math.max(width, (zone.x ?? 0) + (zone.width ?? 0));
-			height = Math.max(height, (zone.y ?? 0) + (zone.height ?? 0));
-		}
-
-		// dimensions must be even, same constraint as the PHP side
-		if (width % 2 !== 0) width += 1;
-		if (height % 2 !== 0) height += 1;
-
-		return { width, height };
+		return computeCanvasDimensions();
 	}
 
 
-	// play scene by id - play a scene
-	playSceneById(sceneId, repeat = true, clearElse = false, z_index = 17) {
+	// play scene by id - play a scene. domIdOverride lets a caller (namely
+	// TriggerEngine, via the 'triggerShow' event) address a video by a
+	// dom_id that isn't derived from the scene id — needed because two
+	// different trigger ports can show the SAME scene_id at once, and each
+	// must be an independently show/hide-able DOM element.
+	playSceneById(sceneId, repeat = true, clearElse = false, z_index = 17, domIdOverride = null) {
 		try {
 			const scenes = configManager.getScenes();
 			const scene = scenes.find(s => s.id === sceneId);
@@ -275,6 +274,8 @@ class PlaybackController {
 				return;
 			}
 
+			const domId = domIdOverride ?? `${scene.id}-${scene.render_version}`;
+
 			if (clearElse) {
 				const currentDomIds = [`${scene.id}-${scene.render_version}`];
 
@@ -283,7 +284,18 @@ class PlaybackController {
 					.filter(s => s.id !== sceneId) // don't re-include the current scene
 					.map(s => `${s.id}-${s.render_version}`);
 
-				const combinedDomIds = [...currentDomIds, ...overrideSceneIds];
+				// currently-visible trigger overlays live under their own
+				// port-scoped dom_ids (see TriggerEngine.domIdForPort), so
+				// they're invisible to the scene-id-based lists above. A
+				// base-scene rotation (the only caller that sets
+				// clearElse=true) must not silently wipe them out from
+				// under TriggerEngine before their own natural expiry —
+				// this is an additive, no-op-when-no-triggers-active
+				// extension to the keep-list, not a change to the base
+				// assertion path's own behavior.
+				const visibleTriggerDomIds = triggerEngine.getVisibleDomIds();
+
+				const combinedDomIds = [...currentDomIds, ...overrideSceneIds, ...visibleTriggerDomIds];
 
 				this.safeSend('clear_videos_except_dom_ids', {
 					dom_ids: combinedDomIds,
@@ -300,7 +312,7 @@ class PlaybackController {
 
 			this.safeSend('assert_video_is_playing', {
 				file: `/content/${scene.id}-${scene.render_version}.mp4`,
-				dom_id: `${scene.id}-${scene.render_version}`,
+				dom_id: domId,
 				x: hasOverlay ? scene.overlay_x : 0,
 				y: hasOverlay ? scene.overlay_y : 0,
 				width: hasOverlay ? scene.overlay_width : canvasWidth,
@@ -313,6 +325,15 @@ class PlaybackController {
 			logger.error(`Failed to play scene ${sceneId}: ${err.message}`);
 		}
 
+	}
+
+
+	// clearVideoByDomId - remove a single video/img element by dom_id
+	// without touching anything else on screen (the base video, or any
+	// other visible trigger). Used when a trigger expires or loses the
+	// visibility contest.
+	clearVideoByDomId(domId) {
+		this.safeSend('clear_video', { dom_id: domId });
 	}
 
 
@@ -349,26 +370,15 @@ class PlaybackController {
 
     		// console.log(`New packet from sense ID: ${object.ID} with data ${object.DATA}`);
 
-            // process the data array from the sense's ports (string to array)
+            // process the data array from the sense's ports (string to array),
+            // and hand it to TriggerEngine, which owns edge detection, per-port
+            // fire/expiry timing, visibility resolution, and the load governor
+            // (roadmap 29b phase 3). This packet is already validated and
+            // paired to this node's assigned Sense above — TriggerEngine trusts
+            // that and does not re-check it.
             const processedDataArrray = object.DATA.split(',').map(Number);
 
-            const triggers = configManager.getTriggers();
-
-			for (let i = 0; i < processedDataArrray.length; i++) {
-				if (processedDataArrray[i] === 1) {
-					const trigger = triggers?.find(t => t.port === i + 1);
-					if (trigger?.scene_id != null) {
-						const port = i + 1;
-						const z = (port === 1) ? 0 : 17 - port; // port 1 = z0, port 2 = z15, ..., port 16 = z1
-
-						this.playSceneById(trigger.scene_id, false, false, z);
-
-						if (configManager.checkLogLevel('detail')) {
-							logger.info(`Trigger on port ${i + 1} -> playing scene ${trigger.scene_id}`);
-						}
-					}
-				}
-			}
+            triggerEngine.processSenseData(processedDataArrray);
 
 			// finished processing triggers
 

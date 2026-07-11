@@ -288,6 +288,10 @@ System initializing...
 					clearVideosExceptDomIds(data);
 					break;
 
+				case 'clear_video':
+					clearVideoById(data);
+					break;
+
 				case 'show_offline_indicator':
 					showOfflineIndicator();
 					break;
@@ -648,6 +652,16 @@ System initializing...
 				});
 			} catch (err) {
 				console.error('clearVideosExceptDomIds failed:', err);
+			}
+		}
+
+
+		function clearVideoById(data) {
+			try {
+				const el = document.getElementById(data?.dom_id);
+				if (el) el.remove();
+			} catch (err) {
+				console.error('clearVideoById failed:', err);
 			}
 		}
 
