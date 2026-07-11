@@ -92,6 +92,20 @@ Once this command runs, the end of the output will include 3 lines that you need
 ### Set Permissions
 `cd ~/flairnode && chmod +x flairnode-kiosk.sh`
 
+### Enable Desktop Autologin
+The unit must boot straight to an auto-logged-in desktop session — the kiosk script only starts Chromium, it doesn't bring up the desktop itself.
+
+`sudo raspi-config` → `1 System Options` → `S5 Boot / Auto Login` → `B4 Desktop Autologin`
+
+Reboot for this to take effect.
+
+### Arm Autostart
+Run the kiosk script once by hand to install its autostart entry:
+
+`./flairnode-kiosk.sh`
+
+This drops a `~/.config/autostart/flairnode-kiosk.desktop` entry (XDG autostart — works the same regardless of desktop environment) that re-launches this same script every time the desktop session comes up. It's safe to re-run — the install step is skipped if the entry already exists. After this one-time run, a power-cycled unit comes back playing with zero human touch.
+
 
 
 
