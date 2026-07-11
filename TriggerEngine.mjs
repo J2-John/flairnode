@@ -35,14 +35,25 @@ const logger = new Logger('TriggerEngine');
 // stale visibility standing.
 const EXPIRY_CHECK_INTERVAL_MS = 1000;  // how often to sweep for expired triggers
 
-// ---- Load governor: calibrate in phase 4 bench testing ----
-// These five numbers are the entire tuning surface for the governor. None
-// of them are derived from real hardware measurement yet — they're
-// placeholder values chosen to be directionally reasonable (os.loadavg()[0]
-// is a Linux 1-minute load average; on a quad-core Pi, a load of ~4 means
-// "fully busy across all cores"), not measured. Revisit all five once
-// phase 4 has real bench numbers for sustained decode load under N visible
-// triggers.
+// ---- Load governor ----
+// CPU_LOAD_THRESHOLD_HIGH/LOW were calibrated July 11, 2026 at 256x256
+// bench scale (Pi 5, 4 cores, base video + 4 trigger streams): loadavg[0]
+// peaked at 0.83 of 4.0 — massive headroom at bench scale. The thresholds
+// below are NOT tuned to that measured peak; they're set well above it
+// (~75%/~50% of core count) as a safety margin. The governor is expected
+// to be INERT in normal operation at this wall scale. If it activates
+// routinely on a larger wall (more zones, higher resolution, more
+// concurrent triggers), recalibrate against THAT wall class specifically —
+// don't just raise these numbers blindly, since that would mask a real
+// capacity problem on the wall that actually tripped it.
+//
+// Saturation is derived from the actual core count (os.cpus().length)
+// rather than an assumed number, so this tracks correctly if the fleet
+// ever runs on hardware with a different core count than this Pi 5.
+//
+// CPU_SAMPLE_INTERVAL_MS, CPU_SUSTAINED_SAMPLES_REQUIRED, and the
+// VISIBLE_CAP_* values were NOT part of this calibration pass — still
+// placeholder values, calibrate in phase 4 bench testing.
 //
 // "Visible" in this engine means accepted-and-rendered, not necessarily
 // seen. Overlapping triggers stack (no conflict/overlap check), so an
@@ -54,11 +65,12 @@ const EXPIRY_CHECK_INTERVAL_MS = 1000;  // how often to sweep for expired trigge
 // redundancy; VISIBLE_CAP is the deliberate budget on how many concurrent
 // decode streams this device carries, independent of whether every one
 // of them is actually contributing pixels.
-const CPU_SAMPLE_INTERVAL_MS = 5000;       // calibrate in phase 4 bench testing
-const CPU_LOAD_THRESHOLD_HIGH = 3.5;       // calibrate in phase 4 bench testing
-const CPU_LOAD_THRESHOLD_LOW = 2.0;        // calibrate in phase 4 bench testing
-const CPU_SUSTAINED_SAMPLES_REQUIRED = 3;  // calibrate in phase 4 bench testing — consecutive samples before acting
-const VISIBLE_CAP_DEFAULT = 4;             // calibrate in phase 4 bench testing
+const CPU_CORE_COUNT = os.cpus().length;                // e.g. 4 on Pi 5 — drives the thresholds below
+const CPU_SAMPLE_INTERVAL_MS = 5000;                     // calibrate in phase 4 bench testing
+const CPU_LOAD_THRESHOLD_HIGH = CPU_CORE_COUNT * 0.75;   // calibrated July 11, 2026 @ 256x256 bench scale
+const CPU_LOAD_THRESHOLD_LOW = CPU_CORE_COUNT * 0.50;    // calibrated July 11, 2026 @ 256x256 bench scale
+const CPU_SUSTAINED_SAMPLES_REQUIRED = 3;                // calibrate in phase 4 bench testing — consecutive samples before acting
+const VISIBLE_CAP_DEFAULT = 4;                           // calibrate in phase 4 bench testing
 const VISIBLE_CAP_FLOOR = 1;
 const VISIBLE_CAP_CEILING = 4;
 
