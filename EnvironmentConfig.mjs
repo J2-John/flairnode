@@ -19,7 +19,7 @@ const DEFAULT_BASE_HOST = (USE_LOCALHOST && LAPTOP_MODE)
 // single value, so a unit can never end up syncing against one cloud while
 // downloading content from another. To point a unit at a different
 // environment (e.g. staging), set the FLAIR_BASE_HOST env var in that unit's
-// pm2 process config (include the scheme, e.g. https://flair-staging.com) —
+// pm2 process config (include the scheme, e.g. https://your-staging-host.example.com) —
 // never hand-edit this file to switch a unit's cloud.
 const BASE_HOST = process.env.FLAIR_BASE_HOST || DEFAULT_BASE_HOST;
 
