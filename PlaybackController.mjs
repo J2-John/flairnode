@@ -300,13 +300,18 @@ class PlaybackController {
 
 			const { width: canvasWidth, height: canvasHeight } = this.getCanvasDimensions();
 
+			// overlay_x/y/width/height are all-or-nothing (cloud never sends one without the rest);
+			// null/absent (older cloud or full-canvas render) falls back to today's full-canvas placement
+			const hasOverlay = scene.overlay_x != null && scene.overlay_y != null
+				&& scene.overlay_width != null && scene.overlay_height != null;
+
 			this.safeSend('assert_video_is_playing', {
 				file: `/content/${scene.id}-${scene.render_version}.mp4`,
 				dom_id: `${scene.id}-${scene.render_version}`,
-				x: 0,
-				y: 0,
-				width: canvasWidth,
-				height: canvasHeight,
+				x: hasOverlay ? scene.overlay_x : 0,
+				y: hasOverlay ? scene.overlay_y : 0,
+				width: hasOverlay ? scene.overlay_width : canvasWidth,
+				height: hasOverlay ? scene.overlay_height : canvasHeight,
 				type: 'video',
 				loop: repeat,
 				z_index: z_index,
