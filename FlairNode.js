@@ -12,6 +12,7 @@ const logger = new Logger('FlairNode');
 import eventHub from './EventHub.mjs';
 
 import idManager from './IdManager.mjs';
+import provisioningManager from './ProvisioningManager.mjs';
 import configManager from './ConfigManager.mjs';
 import networkModule from './NetworkModule.mjs';
 import statusTracker from './StatusTracker.mjs';
@@ -55,9 +56,19 @@ function whenReady(deps, fn) {
 
 
 // these modules have no dependencies on other modules during init, so start them immediately
-idManager.init();
-configManager.init();
 renderSocketClient.init();
+provisioningManager.init();
+configManager.init();
+
+
+// IdManager must not read id.json until ProvisioningManager confirms a valid
+// one exists — on a unit with no identity yet, ProvisioningManager withholds
+// its moduleReady until first-boot provisioning actually succeeds, so
+// IdManager (and therefore everything gated on it below) never runs against
+// a fake id=0 identity (roadmap 17c).
+whenReady(['ProvisioningManager'], () => {
+	idManager.init();
+});
 
 
 // network module needs id and config data to be loaded before its request interval can run correctly
