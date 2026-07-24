@@ -158,9 +158,16 @@ class PlaybackController {
 				if (!wallType) {
 					logger.warn(`No wall type found, unable to show wall type zones.`);
 
-					// Fallback: show serial number if nothing else is active
-					this.safeSend('show_serial_number', { 
-	    				serial_number: idManager.getSerialNumber(), 
+					// Fallback: show serial number if nothing else is active.
+					// security_code rides along here too, since a node with no
+					// wall_type is by definition not yet linked to a wall - that's
+					// exactly the "show the claim PIN" condition. It stops being
+					// sent the moment the cloud assigns a wall_type and this branch
+					// stops running, so hiding it on link is automatic, not a
+					// separate check.
+					this.safeSend('show_serial_number', {
+	    				serial_number: idManager.getSerialNumber(),
+	    				security_code: idManager.getSecurityCode(),
 	    			});
 
 					return;

@@ -130,10 +130,12 @@ function writeIdFile({ node_id, serial_number, security_code }) {
 // a string full-screen, readable across a room, for a different feature
 // (admin-triggered "identify this unit"). No new render.html code needed.
 let lastDisplayText = null;
+let lastDisplaySecurityCode = null;
 
-function pushDisplay(text) {
+function pushDisplay(text, securityCode = null) {
 	lastDisplayText = text;
-	renderSocketClient.send('show_serial_number', { serial_number: text });
+	lastDisplaySecurityCode = securityCode;
+	renderSocketClient.send('show_serial_number', { serial_number: text, security_code: securityCode });
 }
 
 // boot ordering between this module and the Chromium kiosk client
@@ -145,7 +147,7 @@ eventHub.on('renderClientConnected', () => {
 	if (lastDisplayText === null) return;
 
 	setTimeout(() => {
-		renderSocketClient.send('show_serial_number', { serial_number: lastDisplayText });
+		renderSocketClient.send('show_serial_number', { serial_number: lastDisplayText, security_code: lastDisplaySecurityCode });
 	}, 1000);
 });
 
@@ -249,7 +251,7 @@ class ProvisioningManager {
 		const result = await attemptProvision();
 
 		if (result) {
-			pushDisplay(result.serial_number);
+			pushDisplay(result.serial_number, result.security_code);
 			eventHub.emit('moduleReady', 'ProvisioningManager');
 			return;
 		}

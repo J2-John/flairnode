@@ -238,7 +238,7 @@ System initializing...
 				case 'show_serial_number':
 					hideIdentifyScreen();
 					hideWallTypesLayout();
-					showSerialNumberScreen(data?.serial_number);
+					showSerialNumberScreen(data?.serial_number, data?.security_code);
 					hideAllRenderedVideoFiles();
 					break;
 
@@ -371,7 +371,7 @@ System initializing...
 
 
 
-		function showSerialNumberScreen(serialNumber = 'UNKNOWN') {
+		function showSerialNumberScreen(serialNumber = 'UNKNOWN', securityCode = null) {
 			const targetDiv = document.getElementById('serialNumberScreen');
 
 			// set up targetDiv as a grid
@@ -386,8 +386,14 @@ System initializing...
 			targetDiv.style.overflow = 'hidden';
 			targetDiv.style.height = '100vh'; // full screen height
 
-			// define text for each block
-			const text = `${serialNumber}`;
+			// securityCode is the claim PIN, shown only while the node is
+			// unlinked (see PlaybackController's !wallType fallback and
+			// ProvisioningManager's post-provision push) - omitted entirely
+			// once a caller stops passing it, e.g. after the node is linked
+			// and PlaybackController takes the linked branch instead
+			const text = securityCode
+				? `${serialNumber}<br>${securityCode}`
+				: `${serialNumber}`;
 
 			// generate grid cells
 			const totalBlocks = 170;
