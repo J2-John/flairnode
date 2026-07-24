@@ -10,6 +10,8 @@
 
 // import modules
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import eventHub from './EventHub.mjs';
 
 import Logger from './Logger.mjs';
@@ -18,7 +20,17 @@ const logger = new Logger('IDManager');
 
 
 // variables
-const ID_FILE_PATH = '../';  // path to save the id JSON file to
+
+// id.json lives ONE DIRECTORY ABOVE this file, regardless of process.cwd() —
+// resolved from this module's own location (import.meta.url), not the old
+// '../' (relative to whatever directory the process happened to be launched
+// from, which broke unless FlairNode was started with cwd === this
+// directory). Deliberately outside the flairnode/ directory itself: a git
+// pull/clean of the app directory must never be able to wipe device
+// identity. ProvisioningManager.mjs writes this same path on first boot;
+// exported so it stays the single source of truth for both modules.
+export const ID_JSON_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'id.json');
+
 const VERBOSE_LOGGING = false;
 const LAPTOP_MODE = (process.platform == 'darwin');
 
@@ -34,7 +46,7 @@ class IdManager {
 		this.serialnumber = 'unknown!';
 
 		// hold the file path for the id.json file
-		this.filePath = ID_FILE_PATH + 'id.json';
+		this.filePath = ID_JSON_PATH;
 	}
 
 
