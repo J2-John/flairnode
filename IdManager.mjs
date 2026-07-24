@@ -44,6 +44,7 @@ class IdManager {
 		// create variables
 		this.id = 0;
 		this.serialnumber = 'unknown!';
+		this.securitycode = null;
 
 		// hold the file path for the id.json file
 		this.filePath = ID_JSON_PATH;
@@ -73,6 +74,12 @@ class IdManager {
 			this.id = parseInt(parsedData.device_id);
 			this.serialnumber = parsedData.serialnumber;
 
+			// security_code is the claim PIN ProvisioningManager wrote alongside
+			// device_id/serialnumber — not present on hand-provisioned units per
+			// the old runbook, so null is a normal, expected value here, not an
+			// error condition.
+			this.securitycode = parsedData.security_code ?? null;
+
 			// log success!
 			logger.info(`Successfully identified this unit with id ${this.id} and serial number ${this.serialnumber}`);
 		} catch (error) {
@@ -82,6 +89,7 @@ class IdManager {
 			// failover to default values
 			this.id = 0;
 			this.serialnumber = 'unknown!';
+			this.securitycode = null;
 
 			// if running on laptop, the failover values are different
 			if (LAPTOP_MODE) {
@@ -127,6 +135,14 @@ class IdManager {
 
         // else return serialnumber
         return serialnumber;
+	}
+
+
+	// security code (claim PIN) - null on units provisioned before this field
+	// existed, or hand-provisioned per the old runbook; callers must treat
+	// null as "no code to show", not an error
+	getSecurityCode() {
+        return this.securitycode ?? null;
 	}
 }
 
