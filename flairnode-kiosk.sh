@@ -59,4 +59,12 @@ CHROMIUM_FLAGS=(
         --user-data-dir="$HOME/.flair-chrome-test"
 )
 
+# A stale SingletonLock (and friends) in the profile dir survives a reboot,
+# and after a hostname rename mid-provisioning Chromium reads it as "profile
+# in use on another computer" and refuses to launch entirely -> silent
+# desktop instead of kiosk. Safe to always clear at script start: this
+# profile exists only for this one kiosk Chromium instance, so any lock
+# present here is stale by definition (fresh boot or a prior unclean exit).
+rm -f "$HOME/.flair-chrome-test/Singleton"*
+
 chromium "${CHROMIUM_FLAGS[@]}"
