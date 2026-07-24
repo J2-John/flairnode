@@ -67,4 +67,22 @@ CHROMIUM_FLAGS=(
 # present here is stale by definition (fresh boot or a prior unclean exit).
 rm -f "$HOME/.flair-chrome-test/Singleton"*
 
+# Hide the mouse cursor. render.html's own `cursor: none` CSS (added
+# alongside this) is the primary fix and is session-type-agnostic - in true
+# --kiosk fullscreen, Chromium's page content covers the entire screen, so
+# it's what actually draws the visible pointer, on X11 or Wayland alike.
+# This block is defense-in-depth for the X11 case only: XDG_SESSION_TYPE is
+# set by the session manager at login for both session types, so branching
+# on it costs nothing on Wayland (falls through, no-op).
+if [ "$XDG_SESSION_TYPE" = "x11" ]; then
+        if command -v unclutter >/dev/null 2>&1; then
+                unclutter -idle 0 &
+        else
+                echo "unclutter not installed - skipping X11 cursor-hide (relying on render.html's cursor:none)."
+        fi
+fi
+# Wayland compositor-level hiding intentionally not added here yet - see
+# CLAUDE.md's cursor-hiding entry for why (compositor identity on the fresh
+# Bookworm image needs on-device confirmation before picking a tool).
+
 chromium "${CHROMIUM_FLAGS[@]}"
