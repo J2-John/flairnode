@@ -26,6 +26,14 @@ AUTOSTART_DIR="$HOME/.config/autostart"
 AUTOSTART_FILE="$AUTOSTART_DIR/flairnode-kiosk.desktop"
 SCRIPT_PATH="$HOME/flairnode/flairnode-kiosk.sh"
 
+# Where this script actually lives, for invoking its siblings. Resolved from
+# the script's own path rather than $PWD, because XDG autostart gives us no
+# guaranteed working directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Must match THEME_NAME in install-cursor-theme.sh, which owns this name.
+CURSOR_THEME_NAME="flair-blank"
+
 if [ ! -f "$AUTOSTART_FILE" ]; then
         echo "Installing kiosk autostart entry at $AUTOSTART_FILE..."
         mkdir -p "$AUTOSTART_DIR"
@@ -67,13 +75,40 @@ CHROMIUM_FLAGS=(
 # present here is stale by definition (fresh boot or a prior unclean exit).
 rm -f "$HOME/.flair-chrome-test/Singleton"*
 
-# Hide the mouse cursor. render.html's own `cursor: none` CSS (added
-# alongside this) is the primary fix and is session-type-agnostic - in true
-# --kiosk fullscreen, Chromium's page content covers the entire screen, so
-# it's what actually draws the visible pointer, on X11 or Wayland alike.
-# This block is defense-in-depth for the X11 case only: XDG_SESSION_TYPE is
-# set by the session manager at login for both session types, so branching
-# on it costs nothing on Wayland (falls through, no-op).
+# Hide the mouse cursor. Three independent layers, because on FN-00006 the
+# first two each turned out to cover only part of the problem:
+#
+#  1. render.html's own `cursor: none` CSS - governs the pointer while it is
+#     over Chromium's own surface. Kept, still correct, not sufficient on
+#     its own: labwc draws a pointer regardless.
+#  2. unclutter, X11 sessions only (below) - inert on Wayland, which is what
+#     these units actually run.
+#  3. the blank cursor theme installed just below - the compositor-level
+#     fix, and the one that addresses labwc directly.
+#
+# Installing the theme is idempotent and near-instant, so it runs on every
+# launch rather than being gated on a marker file: a unit that was reimaged,
+# had its home directory reset, or shipped before this change self-heals on
+# its next boot with no human touch. It stays silent unless it changes
+# something.
+#
+# Never fatal: a missing or failing cursor install is cosmetic, and a unit
+# that can't hide its pointer must still come up playing content.
+if [ -x "$SCRIPT_DIR/install-cursor-theme.sh" ]; then
+        "$SCRIPT_DIR/install-cursor-theme.sh" || echo "Cursor theme install failed - continuing to kiosk launch anyway."
+else
+        echo "install-cursor-theme.sh missing or not executable at $SCRIPT_DIR - skipping cursor theme install."
+fi
+
+# Belt and braces for the client side: labwc exports XCURSOR_THEME to what
+# it spawns, but this script is started by XDG autostart, so we cannot
+# assume that inheritance reaches us. Setting it here guarantees Chromium
+# and Xwayland resolve cursors through the blank theme too, whatever the
+# compositor did or didn't hand down.
+export XCURSOR_THEME="$CURSOR_THEME_NAME"
+
+# XDG_SESSION_TYPE is set by the session manager at login for both session
+# types, so branching on it costs nothing on Wayland (falls through, no-op).
 if [ "$XDG_SESSION_TYPE" = "x11" ]; then
         if command -v unclutter >/dev/null 2>&1; then
                 unclutter -idle 0 &
@@ -81,8 +116,12 @@ if [ "$XDG_SESSION_TYPE" = "x11" ]; then
                 echo "unclutter not installed - skipping X11 cursor-hide (relying on render.html's cursor:none)."
         fi
 fi
-# Wayland compositor-level hiding intentionally not added here yet - see
-# CLAUDE.md's cursor-hiding entry for why (compositor identity on the fresh
-# Bookworm image needs on-device confirmation before picking a tool).
+
+# Session/compositor identity, logged on every launch. Costs one line in
+# `pm2 logs`-adjacent kiosk output and answers the first question any future
+# cursor/display investigation has to ask, without needing a live SSH
+# session on the unit at the time.
+COMPOSITOR="$(pgrep -l -x 'labwc|wayfire|sway' 2>/dev/null | tr '\n' ' ')"
+echo "Session: XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-unset}, compositor=${COMPOSITOR:-none}, XCURSOR_THEME=$XCURSOR_THEME"
 
 chromium "${CHROMIUM_FLAGS[@]}"

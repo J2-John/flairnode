@@ -1,0 +1,12 @@
+# Assets/cursors/blank.xcursor is a binary Xcursor image. Git's auto-detection
+# would almost certainly classify it as binary on its own (it is mostly NUL
+# bytes), but "almost certainly" is not a good enough guarantee for a file whose
+# only job is to be byte-exact on a Pi: a single CRLF translation on checkout
+# corrupts the header and the compositor silently falls back to a visible
+# cursor. Say it explicitly instead.
+*.xcursor binary
+
+# Shell scripts are executed on the Pi. Committed from Windows, so pin LF
+# endings - a CRLF shebang line makes the kernel fail the exec with a
+# "bad interpreter" error that reads as a missing file.
+*.sh text eol=lf
