@@ -89,6 +89,13 @@ Once this command runs, the end of the output will include 3 lines that you need
 
 ## 4. Chrome Kiosk Auto Launch
 
+### Install Cursor Hiding Dependency
+`sudo apt install -y wtype`
+
+This lets the kiosk script fire labwc's HideCursor keybind at startup, which is what actually hides the mouse pointer on a Pi 5 (the Pi 5's HDMI CEC receivers register as pointer devices, so the compositor draws a cursor even with no mouse plugged in).
+
+Do **not** install `unclutter` on a Pi 5. It is X11-only and these units run Wayland, so it does nothing here — the kiosk script keeps an unclutter branch solely for legacy X11 units.
+
 ### Set Permissions
 `cd ~/flairnode && chmod +x flairnode-kiosk.sh`
 
