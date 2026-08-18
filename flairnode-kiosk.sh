@@ -135,6 +135,113 @@ if [ -n "$RUNNING_KIOSK_PID" ]; then
         exit 0
 fi
 
+# USB WI-FI PROVISIONING. Deliberately placed AFTER both concurrency guards
+# above: a duplicate invocation must exit before this block mounts anything or
+# runs anything, because mounting and executing are not idempotent the way the
+# autostart install is.
+#
+# SECURITY, STATED SO IT IS NOT WIDENED BY ACCIDENT: this executes a script
+# carried on removable media, as root. That is a physical-access-to-root path by
+# construction, and it is accepted deliberately — the field case is a technician
+# at an install with no network yet, who needs to hand a wall its Wi-Fi
+# credentials with nothing but a USB stick. Anyone who can plug a stick into
+# this unit can already take the SD card, so this grants no capability that
+# physical access did not already carry. What it must never become is a REMOTE
+# path: nothing here may accept a filename, a URL, or a device from anywhere but
+# a locally mounted volume, and the mount point must stay a fixed literal. Do
+# not parameterise it, do not read it from a config file, do not let a payload
+# name its own script.
+#
+# Every failure here is non-fatal and logged. A wall that cannot provision Wi-Fi
+# must still play — a black screen at a customer site is worse than a unit that
+# stayed on the network it already had.
+#
+# EVERY sudo BELOW IS `sudo -n`, AND THE -n IS NOT OPTIONAL. This block runs from
+# XDG autostart, before chromium, with no terminal attached. On a unit that lacks
+# passwordless sudo a bare `sudo` blocks on a password prompt that nobody can
+# ever answer, and the kiosk never launches — a fail-CLOSED path sitting in the
+# middle of a fail-open design, and the first sudo this script has ever had. With
+# -n, sudo refuses immediately ("sudo: a password is required") and every one of
+# those refusals lands on a warn-and-continue branch below, so the worst case on
+# such a unit is "no Wi-Fi provisioning, kiosk starts normally" instead of a black
+# wall. Do not drop the -n. The mount call deliberately does NOT redirect stderr,
+# which is the only reason that message reaches the log at all — the [ -b ] guard
+# means a stickless unit never reaches mount, so the only errors it can print are
+# ones worth reading. Do not add 2>/dev/null back to it.
+#
+# Paths are anchored to this script's own location on disk, never to $PWD — the
+# same treatment IdManager.mjs got in 6f6bd3c. A cwd-relative path here would
+# resolve against whatever directory the desktop session happened to launch the
+# autostart entry from, which is not knowable and not stable.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+USB_MOUNT="/media/usb"
+USB_DEVICE="/dev/sda1"
+USB_WIFI_SRC="$USB_MOUNT/connectWiFi.sh"
+CONNECT_SCRIPT="$SCRIPT_DIR/connect.sh"
+
+if mountpoint -q "$USB_MOUNT" 2>/dev/null; then
+        echo "[usb-wifi] $USB_MOUNT is already mounted - using it as-is."
+elif [ -b "$USB_DEVICE" ]; then
+        sudo -n mkdir -p "$USB_MOUNT" 2>/dev/null
+        if sudo -n mount "$USB_DEVICE" "$USB_MOUNT"; then
+                echo "[usb-wifi] mounted $USB_DEVICE at $USB_MOUNT."
+        else
+                echo "WARNING: [usb-wifi] mount of $USB_DEVICE at $USB_MOUNT failed - skipping Wi-Fi provisioning, continuing to the kiosk."
+        fi
+else
+        echo "[usb-wifi] no block device at $USB_DEVICE - no USB stick present, skipping Wi-Fi provisioning."
+fi
+
+# -s, not a find(1) command substitution: the source must exist AND be
+# non-empty before anything downstream touches the destination. The only shell
+# redirect below writes to a TEMP file, never to $CONNECT_SCRIPT, so an absent
+# or empty source cannot truncate an existing connect.sh as a side effect of
+# merely testing for it.
+if [ -s "$USB_WIFI_SRC" ]; then
+        # CRLF STRIP — LOAD-BEARING, DO NOT REMOVE. A connectWiFi.sh authored on
+        # Windows and carried on a FAT thumb drive has CRLF line endings. Linux
+        # takes everything up to the first \n as the shebang's interpreter line,
+        # so `#!/usr/bin/env bash` followed by \r\n asks env for a program named
+        # literally "bash\r" and the script dies with
+        #     env: 'bash\r': No such file or directory
+        # before one line of it runs — on precisely the case this feature exists
+        # for, a technician with a stick made on a Windows laptop. install(1) is
+        # a byte-for-byte copy and will faithfully preserve those CRs, so the
+        # strip has to happen before it, not instead of it.
+        #
+        # Strip to a temp file, then install FROM the temp file. That keeps all
+        # three properties at once: the CRs are gone, the redirect can never
+        # truncate the destination, and install(1) still performs the final
+        # write so mode and ownership are set as the file appears rather than
+        # after it — never briefly world-writable with root about to run it.
+        # 700 root:root: a script root executes must not be writable by the
+        # user it protects against. mktemp creates the temp file 0600.
+        #
+        # tr reads the stick unprivileged on purpose — only the install needs
+        # root. If a future mount arrives root-only-readable the tr simply
+        # fails, which is handled below and still reaches the kiosk.
+        USB_WIFI_TMP="$(mktemp)"
+
+        if ! tr -d '\r' < "$USB_WIFI_SRC" > "$USB_WIFI_TMP" || [ ! -s "$USB_WIFI_TMP" ]; then
+                echo "WARNING: [usb-wifi] could not read or line-ending-normalise $USB_WIFI_SRC - continuing to the kiosk."
+        elif sudo -n install -m 700 -o root -g root "$USB_WIFI_TMP" "$CONNECT_SCRIPT"; then
+                echo "[usb-wifi] installed $CONNECT_SCRIPT as 700 root:root, CRLF stripped - running it."
+
+                if sudo -n "$CONNECT_SCRIPT"; then
+                        echo "[usb-wifi] Wi-Fi provisioning script completed successfully."
+                else
+                        echo "WARNING: [usb-wifi] $CONNECT_SCRIPT exited non-zero - continuing to the kiosk anyway."
+                fi
+        else
+                echo "WARNING: [usb-wifi] could not install $CONNECT_SCRIPT from $USB_WIFI_SRC - continuing to the kiosk."
+        fi
+
+        rm -f "$USB_WIFI_TMP"
+else
+        echo "[usb-wifi] no non-empty $USB_WIFI_SRC found - nothing to provision. Any existing $CONNECT_SCRIPT is left untouched."
+fi
+
 echo "Starting Chromium test kiosk..."
 sleep 3;
 
