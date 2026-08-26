@@ -164,7 +164,13 @@ class TriggerEngine {
 			}
 
 			const now = Date.now();
-			let anyFired = false;
+
+			// anyChanged, not anyFired: switch-mode ports can now LEAVE
+			// portState on a falling edge, and a removal needs the same
+			// resolveVisibility() recompute a fire does. Naming it for firing
+			// alone is what would let a removal skip the recompute and leave a
+			// hidden-but-still-shown scene on the glass.
+			let anyChanged = false;
 
 			for (let i = 0; i < dataArray.length; i++) {
 				const port = i + 1;
@@ -172,17 +178,50 @@ class TriggerEngine {
 				const wasActive = this.previousSenseData[i] === 1;
 
 				// FIRE only on the inactive->active edge — holding active
-				// across packets is not a re-fire (locked ruleset §2).
+				// across packets is not a re-fire (locked ruleset §2). This is
+				// identical for both modes; mode only changes what happens
+				// while held and on release.
 				if (isActive && !wasActive) {
 					if (this.fireTrigger(port, now)) {
-						anyFired = true;
+						anyChanged = true;
+					}
+				} else if (isActive) {
+					// HELD HIGH (active this packet and the last one). A pulse
+					// port ignores this entirely and runs out its own clock —
+					// unchanged from before. A switch port instead has its
+					// window pushed forward so it stays alive, and keeps
+					// looping, for as long as the contact is closed.
+					//
+					// Deliberately does NOT set anyChanged: the set of active
+					// ports is identical, so there is nothing for
+					// resolveVisibility() to recompute, and calling it here
+					// would re-show the scene on every packet (locked ruleset
+					// §2's "holding active is not a re-fire" applies to the
+					// visible effect too, not just to fireTrigger).
+					const state = this.portState[port];
+
+					if (state && state.mode === 'switch') {
+						state.expiresAt = now + state.durationMs;
+					}
+				} else if (wasActive) {
+					// FALLING EDGE (contact opened). Pulse ignores this and
+					// expires on its own schedule via checkExpiries() — again
+					// unchanged. Switch ends immediately: drop the port's state
+					// and flag the recompute so resolveVisibility() hides it.
+					const state = this.portState[port];
+
+					if (state && state.mode === 'switch') {
+						delete this.portState[port];
+						anyChanged = true;
+
+						logger.info(`Trigger port ${port} released (switch) -> ended`);
 					}
 				}
 			}
 
 			this.previousSenseData = dataArray;
 
-			if (anyFired) {
+			if (anyChanged) {
 				this.resolveVisibility();
 			}
 		} catch (error) {
@@ -214,16 +253,33 @@ class TriggerEngine {
 
 		const isReFire = !!this.portState[port];
 
+		// Per-trigger mode. ABSENT MEANS PULSE, deliberately: a config synced
+		// from a cloud that has never heard of this field must behave exactly
+		// as it did before the field existed. Anything that isn't the literal
+		// string 'switch' is pulse — this never guesses from a truthy value.
+		//
+		// pulse:  fire on the rising edge, run for duration_seconds, expire on
+		//         its own. The contact opening again means nothing.
+		// switch: fire on the rising edge, then stay alive for as long as the
+		//         contact is held closed (processSenseData pushes expiresAt
+		//         forward on every held-high packet), and end the moment it
+		//         opens. durationMs is carried here so that refresh has the
+		//         window length without re-reading config on every packet.
+		const mode = triggerConfig.mode === 'switch' ? 'switch' : 'pulse';
+		const durationMs = durationSeconds * 1000;
+
 		// Re-fire restarts the countdown (new expiresAt) whether currently
 		// visible or hidden (locked ruleset §3) — a plain overwrite already
 		// gives us exactly that, visible or not.
 		this.portState[port] = {
 			sceneId: triggerConfig.scene_id,
 			firedAt: now,
-			expiresAt: now + (durationSeconds * 1000),
+			expiresAt: now + durationMs,
+			mode,
+			durationMs,
 		};
 
-		logger.info(`Trigger port ${port} ${isReFire ? 're-fired' : 'fired'} -> scene ${triggerConfig.scene_id}, expires in ${durationSeconds}s`);
+		logger.info(`Trigger port ${port} ${isReFire ? 're-fired' : 'fired'} (${mode}) -> scene ${triggerConfig.scene_id}, expires in ${durationSeconds}s`);
 
 		return true;
 	}
