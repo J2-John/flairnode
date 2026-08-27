@@ -4,3 +4,5 @@ config.json
 id.json
 update-last.log
 .update.lock
+update-last.log
+.update.lock
