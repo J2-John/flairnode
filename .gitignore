@@ -2,3 +2,5 @@
 config.json
 /content/*
 id.json
+update-last.log
+.update.lock
