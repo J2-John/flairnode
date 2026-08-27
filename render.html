@@ -581,6 +581,21 @@ System initializing...
 				element.muted = true;
 				element.playsInline = true;
 
+				// Suppress Chromium's remote-playback ("cast") indicator, which
+				// appears over the wall whenever a video starts - most visibly
+				// when a trigger fires. Set as a property AND an attribute:
+				// the property is what Chromium reads, the attribute keeps it
+				// visible in the DOM for anyone inspecting a live node.
+				//
+				// Deliberately not a browser flag. The kiosk script already
+				// passes --disable-features=PointerLock and the OS injects its
+				// own flags ahead of ours; multiple --disable-features flags do
+				// NOT merge, the last one wins, so adding MediaRouter there
+				// would silently drop PointerLock. A per-element attribute
+				// cannot be clobbered by OS-level Chromium config.
+				element.disableRemotePlayback = true;
+				element.setAttribute('disableremoteplayback', '');
+
 				const shouldLoop = data.loop !== false;
 				element.loop = shouldLoop;
 

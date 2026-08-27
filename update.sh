@@ -158,11 +158,22 @@ fi
 
 CHANGED="$(wc -l < "$RSYNC_LOG" | tr -d ' ')"
 
+# Did this update replace THIS script? rsync writes a temp file and renames, so
+# the running bash keeps reading the old inode and finishes normally — but the
+# NEXT invocation is a different program. That is correct behaviour (updates
+# should be able to update the updater) and it is completely silent, which is
+# how it goes unnoticed. Announce it.
+SELF=""
+if grep -qE ' update\.sh$' "$RSYNC_LOG"; then
+        SELF=" self-replaced=yes"
+        say "NOTE: this update replaced update.sh itself - the next run is a different script"
+fi
+
 cleanup_tmp
 
 # --- report ------------------------------------------------------------------
 # This LAST stdout line is what MacrosModule reports to the cloud. It must
 # describe what happened. It must never be a fixed string.
 say "done - $CHANGED path(s) changed"
-echo "UPDATE OK: ref=$REF changed=$CHANGED"
+echo "UPDATE OK: ref=$REF changed=$CHANGED$SELF"
 exit 0
