@@ -10,6 +10,7 @@
 // import modules
 import fs from 'fs';
 import path from 'path';
+import { pipeline } from 'stream/promises';
 import axios from 'axios';
 import eventHub from './EventHub.mjs';
 
@@ -161,45 +162,60 @@ class ContentDownloadManager {
 
 
 	// downloadFile - handles single download with timeout
-	downloadFile(item) {
-		return new Promise((resolve, reject) => {
-			try {
-				const controller = new AbortController();
-				const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+	//
+	// Rewritten 2026-09-04 (review H10). The previous version piped the
+	// response into a write stream at the FINAL path and resolved on the
+	// writer's 'finish'. Two things were wrong with that, and together they
+	// wedged the queue for the life of the process:
+	//   1. pipe() does not forward a source error to the destination. When
+	//      the connection dropped or the 5-minute abort fired, the response
+	//      stream errored, the writer never finished and never errored, and
+	//      the promise never settled — so isDownloading stayed true and no
+	//      later download (or purge) could ever start.
+	//   2. The partial file sat at its final path, so every later scan saw
+	//      it as present and complete. Device renders have no +faststart, so
+	//      a truncated mp4 has no header at all and cannot play.
+	// Now: download to a .part file; pipeline() settles on every outcome and
+	// destroys both streams; the byte count is checked against Content-Length
+	// when the server sends one; only then is the file renamed into place.
+	// Anything else deletes the .part and rejects, and the next scan simply
+	// queues the file again.
+	async downloadFile(item) {
+		const partPath = `${item.path}.part`;
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
 
-				axios.get(item.url, {
-					responseType: 'stream',
-					signal: controller.signal,
-				})
-				.then(response => {
-					const writer = fs.createWriteStream(item.path);
-					response.data.pipe(writer);
+		try {
+			const response = await axios.get(item.url, {
+				responseType: 'stream',
+				signal: controller.signal,
+			});
 
-					writer.on('finish', () => {
-						clearTimeout(timeout);
+			const expectedBytes = Number(response.headers['content-length']);
 
-        				if (configManager.checkLogLevel('interval')) {
-							logger.info(`Downloaded: ${item.filename}`);
-						}
+			await pipeline(response.data, fs.createWriteStream(partPath));
 
-						// console.log(`Downloaded: ${item.filename}`);
-							
-						resolve();
-					});
+			const writtenBytes = fs.statSync(partPath).size;
 
-					writer.on('error', (err) => {
-						clearTimeout(timeout);
-						reject(err);
-					});
-				})
-				.catch(err => {
-					clearTimeout(timeout);
-					reject(err);
-				});
-			} catch (err) {
-				reject(err);
+			if (Number.isFinite(expectedBytes) && expectedBytes > 0 && writtenBytes !== expectedBytes) {
+				throw new Error(`short download: got ${writtenBytes} of ${expectedBytes} bytes`);
 			}
-		});
+
+			if (writtenBytes === 0) {
+				throw new Error('empty download');
+			}
+
+			fs.renameSync(partPath, item.path);
+
+			if (configManager.checkLogLevel('interval')) {
+				logger.info(`Downloaded: ${item.filename} (${writtenBytes} bytes)`);
+			}
+		} catch (err) {
+			try { fs.unlinkSync(partPath); } catch (_) { /* nothing to remove */ }
+			throw err;
+		} finally {
+			clearTimeout(timeout);
+		}
 	}
 
 
@@ -218,6 +234,15 @@ class ContentDownloadManager {
 
 			for (const file of filesInContent) {
 				try {
+					// A .part left behind by a crash mid-download (the normal
+					// failure path already removes its own). Never the one being
+					// written right now.
+					if (file.endsWith('.part') && this.activeDownload?.filename !== file.slice(0, -5)) {
+						fs.unlinkSync(path.join(OUTPUT_DIR, file));
+						deletedFiles.push(file);
+						continue;
+					}
+
 					const match = file.match(/(\d+)-(\d+)\.mp4$/);
 					if (!match) continue;
 

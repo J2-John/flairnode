@@ -286,23 +286,29 @@ class PlaybackController {
 			if (clearElse) {
 				const currentDomIds = [`${scene.id}-${scene.render_version}`];
 
-				// include overrides (z_index < 17) — we'll assume those are the active ones
-				const overrideSceneIds = configManager.getScenes()
-					.filter(s => s.id !== sceneId) // don't re-include the current scene
-					.map(s => `${s.id}-${s.render_version}`);
-
-				// currently-visible trigger overlays live under their own
-				// port-scoped dom_ids (see TriggerEngine.domIdForPort), so
-				// they're invisible to the scene-id-based lists above. A
+				// The keep-list is the scene being rotated TO plus whatever
+				// trigger overlays are visible right now — nothing else.
+				//
+				// Until 2026-09-04 (review H11) this also kept EVERY other
+				// scene in config, under a comment that read "include
+				// overrides (z_index < 17) — we'll assume those are the
+				// active ones". That predates TriggerEngine: overlays now
+				// live under port-scoped dom_ids (see below), so the list
+				// was keeping every previous base scene's <video> alive. At
+				// equal z-index the later-appended element wins, so on the
+				// second rotation of a two-scene schedule the wall showed
+				// the wrong scene, with one running decoder per scene ever
+				// played. Executed end to end by the review with the real
+				// PlaybackController output through render.html's functions.
+				//
+				// Currently-visible trigger overlays live under their own
+				// port-scoped dom_ids (see TriggerEngine.domIdForPort). A
 				// base-scene rotation (the only caller that sets
-				// clearElse=true) must not silently wipe them out from
-				// under TriggerEngine before their own natural expiry —
-				// this is an additive, no-op-when-no-triggers-active
-				// extension to the keep-list, not a change to the base
-				// assertion path's own behavior.
+				// clearElse=true) must not wipe them out from under
+				// TriggerEngine before their own natural expiry.
 				const visibleTriggerDomIds = triggerEngine.getVisibleDomIds();
 
-				const combinedDomIds = [...currentDomIds, ...overrideSceneIds, ...visibleTriggerDomIds];
+				const combinedDomIds = [...currentDomIds, ...visibleTriggerDomIds];
 
 				this.safeSend('clear_videos_except_dom_ids', {
 					dom_ids: combinedDomIds,

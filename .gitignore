@@ -6,3 +6,6 @@ update-last.log
 .update.lock
 update-last.log
 .update.lock
+missedNetworkMessages.json
+# Runtime state written by MacrosModule (last-actioned timestamps and outcomes)
+lastMacroActioned.json

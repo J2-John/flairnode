@@ -37,6 +37,13 @@ const VERBOSE_LOGGING = false;
 
 const MISSED_MESSAGES_FILE_PATH = './';  // path to save the config JSON file to
 const MAX_MESSAGES_TO_RESEND_AT_ONCE = 250;
+// Hard cap on entries kept in missedNetworkMessages.json while offline. Added
+// 2026-09-04 (review H12): with no cap the file grew ~21 MB/day and, because
+// every cycle parses and rewrites the whole file synchronously, a week offline
+// meant ~2.4 s of event-loop stall every 10 s — playback asserts and trigger
+// timing included. On reconnect only the last MAX_LOGS_PER_QUEUE logs survive
+// anyway, so keeping thousands buys nothing. Oldest entries are dropped first.
+const MAX_MISSED_MESSAGES_STORED = 1000;
 
 
 
@@ -260,11 +267,25 @@ class NetworkModule {
     	}
 
     	// create an object for the actual request
+    	//
+    	// security_code and firmware_version added 2026-09-04 (review C1,
+    	// phase 2). The serial is derived from the id, so id + serial proved
+    	// nothing; the cloud now authenticates the device by its claim PIN.
+    	// Sent only when the unit HAS one — a legacy hand-provisioned unit with
+    	// no code in id.json omits the key, which the cloud accepts (and logs)
+    	// during the rollout rather than refusing. Never send null: the cloud
+    	// treats a present-but-wrong value as an imposter.
     	const requestObject = {
     		node_id: idManager.getId(),
     		serial_number: idManager.getSerialNumber(),
+    		firmware_version: environment.FIRMWARE_VERSION,
     		payload: payload,
     	};
+
+    	const securityCode = idManager.getSecurityCode();
+    	if (typeof securityCode === 'string' && securityCode.length > 0) {
+    		requestObject.security_code = securityCode;
+    	}
 
     	// log the entire request object
     	// console.log(JSON.stringify(requestObject));
@@ -490,6 +511,16 @@ class NetworkModule {
     	// collect the queueToSaveToFile: the array of the previous data in the queue, plus the new payload added at the end
     	let queueToSaveToFile = parsedData;
     	queueToSaveToFile.push(...payload);
+
+    	// enforce the cap — drop the OLDEST entries, keep the newest
+    	if (queueToSaveToFile.length > MAX_MISSED_MESSAGES_STORED) {
+    		const dropped = queueToSaveToFile.length - MAX_MISSED_MESSAGES_STORED;
+    		queueToSaveToFile.splice(0, dropped);
+
+    		if (configManager.checkLogLevel('detail')) {
+    			logger.warn(`Missed-message store is full; dropped the ${dropped} oldest entries.`);
+    		}
+    	}
 
     	// save to file
     	this.saveMissedNetworkMessagesJSONToFile(queueToSaveToFile);

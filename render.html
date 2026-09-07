@@ -614,6 +614,7 @@ System initializing...
 			}
 
 			element.id = data.dom_id;
+			element.dataset.mountedAt = String(Date.now());
 			element.style.position = 'absolute';
 			element.style.left = data.x + 'px';
 			element.style.top = data.y + 'px';
@@ -626,19 +627,33 @@ System initializing...
 			layout.appendChild(element);
 		}
 
+		// Grace period for a freshly mounted <video> to reach readyState 2.
+		// Before 2026-09-04 a clip still loading on the tick after it was
+		// mounted was "invalid", torn down, and mounted again on the next
+		// tick — a 1 s gap on slow media, and a permanent 1 Hz create/
+		// destroy loop on an unplayable file.
+		const VIDEO_LOAD_GRACE_MS = 15000;
+
 		function assertVideoIsPlaying(data) {
 			const existing = document.getElementById(data.dom_id);
+			let needsRender = true;
 
 			if (existing) {
 				// Handle VIDEO check
 				if (existing.tagName === 'VIDEO') {
-					const isValid =
-						existing.readyState >= 2 &&
-						!existing.paused &&
-						!existing.ended;
+					const ageMs = Date.now() - Number(existing.dataset.mountedAt || 0);
 
-					if (isValid) {
-						return; // No action needed
+					if (existing.error) {
+						// A real decode/network error: replace it below.
+					} else if (existing.readyState < 2 && ageMs < VIDEO_LOAD_GRACE_MS) {
+						return; // Still loading — leave it alone.
+					} else if (existing.readyState >= 2 && existing.paused && !existing.ended) {
+						// Loaded but paused (autoplay refused, or a page stall):
+						// nudge it rather than rebuild it.
+						existing.play().catch(function () {});
+						return;
+					} else if (existing.readyState >= 2 && !existing.paused && !existing.ended) {
+						return; // Healthy.
 					}
 				}
 
@@ -654,12 +669,14 @@ System initializing...
 					}
 				}
 
-				// Element is invalid, remove it and fall through to render a new one
+				// Element is invalid: remove it and re-render below. (The old
+				// code removed it and then tested `if (!existing)` — a removed
+				// node is still a truthy reference, so the re-render never
+				// ran in the same call. Review M21, 2026-09-04.)
 				existing.remove();
 			}
 
-			// if no valid element found, re-render this element
-			if (!existing) { renderVideoFile(data); }
+			if (needsRender) { renderVideoFile(data); }
 		}
 
 		function clearVideosExceptDomIds(data) {

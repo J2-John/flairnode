@@ -181,8 +181,41 @@ class MacrosModule {
     // record that the given action (reboot/update) was just actioned, so subsequent
     // sync cycles within the guard window know to skip it
     markActioned(actionType) {
+        this.writeActionRecord(actionType, (data) => {
+            data[actionType] = Date.now();
+            // outcome unknown until the command reports back
+            delete data[`${actionType}_success`];
+        });
+    }
+
+
+    // record how the action turned out, so a sync cycle that lands inside the
+    // guard window reports THAT — not a blanket success. Added 2026-09-04
+    // (review M16): a failed reboot or update was acked as success on the
+    // next cycle by the guard branch, and the cloud cleared the flag on it.
+    markOutcome(actionType, success) {
+        this.writeActionRecord(actionType, (data) => {
+            data[`${actionType}_success`] = success === true;
+        });
+    }
+
+
+    // the recorded outcome of the last actioning, or null if none was recorded
+    // (older file, or the command has not reported back yet)
+    lastOutcome(actionType) {
         try {
-            // start with whatever's already in the file, so we don't clobber the other action's timestamp
+            const data = JSON.parse(fs.readFileSync(MACRO_ACTION_FILE_PATH));
+            const value = data[`${actionType}_success`];
+            return typeof value === 'boolean' ? value : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+
+    // read-modify-write of the action record file; the other action's fields are preserved
+    writeActionRecord(actionType, mutate) {
+        try {
             let data = {};
             try {
                 data = JSON.parse(fs.readFileSync(MACRO_ACTION_FILE_PATH));
@@ -190,14 +223,12 @@ class MacrosModule {
                 data = {};
             }
 
-            // set the timestamp for this action type
-            data[actionType] = Date.now();
+            mutate(data);
 
-            // write it back to the file
             fs.writeFileSync(MACRO_ACTION_FILE_PATH, JSON.stringify(data, null, 2));
         } catch (error) {
             // log the error, but don't block the action from proceeding
-            logger.error(`Error saving ${actionType} action timestamp: ${error.message}`);
+            logger.error(`Error saving ${actionType} action record: ${error.message}`);
         }
     }
 
@@ -216,9 +247,14 @@ class MacrosModule {
                     // log that we're skipping
                     logger.warn(`Reboot already actioned recently, skipping to avoid a reboot loop.`);
 
-                    // report success so the server sees it and (hopefully) clears the flag
-                    this.rebootCommandSuccess = true;
-                    this.rebootCommandResults = 'Reboot already actioned recently, skipped to avoid a loop.';
+                    // report what actually happened last time, so the cloud clears
+                    // the flag only on a real success (review M16). An unrecorded
+                    // outcome (older record) keeps the previous behaviour.
+                    const outcome = this.lastOutcome('reboot');
+                    this.rebootCommandSuccess = outcome === null ? true : outcome;
+                    this.rebootCommandResults = outcome === false
+                        ? 'Reboot was attempted recently and FAILED; not retrying inside the guard window.'
+                        : 'Reboot already actioned recently, skipped to avoid a loop.';
 
                     // resolve without re-actioning
                     resolve(this.rebootCommandResults);
@@ -228,6 +264,15 @@ class MacrosModule {
                 // record that we're actioning this reboot now, before executing it,
                 // so we don't re-action it on the next sync cycle
                 this.markActioned('reboot');
+
+                // Clear the flag in the device's OWN persisted config (review M17).
+                // The cloud sends an explicit false once the command is no longer
+                // pending — but a unit that loses its WAN inside the ack window
+                // keeps reboot:true in config.json, and after the guard window
+                // it rebooted again, every ~6 minutes, until connectivity came
+                // back. The cloud re-sends true on the next sync if it is still
+                // pending, so nothing legitimate is lost.
+                configManager.clearCommandFlag('reboot');
 
                 // check if we're running on laptop or raspi
                 if (!LAPTOP_MODE) {
@@ -240,6 +285,7 @@ class MacrosModule {
                         if (error) {
                             // set the rebootCommandSuccess variable to false, since the reboot failed
                             this.rebootCommandSuccess = false;
+                            this.markOutcome('reboot', false);
 
                             // set the rebootCommandResults variable to the error text
                             this.rebootCommandResults = error;
@@ -259,6 +305,7 @@ class MacrosModule {
                         } else {
                             // otherwise success, so set this.rebootCommandSuccess to true to indicate that the command was successful
                             this.rebootCommandSuccess = true;
+                            this.markOutcome('reboot', true);
 
                             // set the rebootCommandResults variable to the success output from console
                             if (stdout.length > 0) {
@@ -348,9 +395,12 @@ class MacrosModule {
                     // log that we're skipping
                     logger.warn(`Update already actioned recently, skipping to avoid an update loop.`);
 
-                    // report success so the server sees it and (hopefully) clears the flag
-                    this.updateCommandSuccess = true;
-                    this.updateCommandResults = 'Update already actioned recently, skipped to avoid a loop.';
+                    // report what actually happened last time (review M16) — see handleReboot()
+                    const outcome = this.lastOutcome('update');
+                    this.updateCommandSuccess = outcome === null ? true : outcome;
+                    this.updateCommandResults = outcome === false
+                        ? 'Update was attempted recently and FAILED; not retrying inside the guard window.'
+                        : 'Update already actioned recently, skipped to avoid a loop.';
 
                     // resolve without re-actioning
                     resolve(this.updateCommandResults);
@@ -360,6 +410,9 @@ class MacrosModule {
                 // record that we're actioning this update now, before executing it,
                 // so we don't re-action it on the next sync cycle
                 this.markActioned('update');
+
+                // clear the persisted flag on the device side (review M17) — see handleReboot()
+                configManager.clearCommandFlag('update');
 
                 // log that an update was queued
                 logger.info('Update queued from server!');
@@ -374,6 +427,7 @@ class MacrosModule {
 
                         // set the updateCommandSuccess variable to false, since the update failed
                         this.updateCommandSuccess = false;
+                        this.markOutcome('update', false);
 
                         // set the updateCommandResults variable to the error text
                         this.updateCommandResults = `An error occurred during the update: ${error}`;
@@ -393,10 +447,14 @@ class MacrosModule {
                     } else {
                         // otherwise success, so set this.updateCommandSuccess to true to indicate that the command was successful
                         this.updateCommandSuccess = true;
+                        this.markOutcome('update', true);
 
-                        // get the results string from running the update
-                        const lines = stdout.split('\n');
-                        const results = lines[lines.length - 2].trim();
+                        // get the results string from running the update: the last
+                        // non-empty line of stdout. (Was lines[length - 2] — equal to
+                        // that only when stdout ends in exactly one newline, and a
+                        // TypeError on a quiet script. Review F19, 2026-09-04.)
+                        const lines = stdout.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+                        const results = lines.length > 0 ? lines[lines.length - 1] : 'update.sh produced no output';
 
                         // set the rebootCommandResults variable to the success output from console
                         this.updateCommandResults = results;

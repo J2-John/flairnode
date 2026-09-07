@@ -92,8 +92,13 @@ class ConfigManager {
 				logger.info('Saving configuration to file...');
 			}
 
-			// actually write the config to a file
-			fs.writeFileSync(this.filePath, JSON.stringify(this.config, null, 2));
+			// actually write the config to a file — via a temp file and rename,
+			// so a power cut mid-write leaves the previous config intact rather
+			// than a truncated one (review F11, 2026-09-04). Rename is atomic on
+			// the same filesystem; the temp file sits beside the target.
+			const tempPath = `${this.filePath}.tmp`;
+			fs.writeFileSync(tempPath, JSON.stringify(this.config, null, 2));
+			fs.renameSync(tempPath, this.filePath);
 
 			// log success
 			if (this.checkLogLevel('detail')) {
@@ -133,6 +138,18 @@ class ConfigManager {
 
 			// set this.config to the merged objects: this.config (original) and newData (new)
 			this.config = this.mergeObjects(this.config, newData);
+
+			// Apply the location's timezone to this process (review M22,
+			// 2026-09-04). The cloud has always sent `timezone` (the
+			// location's, e.g. America/Chicago) and nothing here ever read
+			// it: PlaybackController evaluates the schedule with
+			// new Date().getHours(), i.e. the Pi's OS zone — UTC on any unit
+			// where the timezone step was skipped at setup, so content
+			// played at the wrong wall-clock hour. Node re-reads process.env.TZ
+			// for every subsequent Date, so setting it here is enough; the
+			// value is applied only when it changes, and only when it looks
+			// like an IANA zone name.
+			this.applyTimezone(this.config?.timezone);
 
 			// log success message
 			if (this.checkLogLevel('detail')) {
@@ -300,6 +317,33 @@ class ConfigManager {
 	// so a triggered dump only fires once per cloud request
 	clearDiagnosticDump() {
 		this.config.diagnosticDump = false;
+	}
+
+	// set process.env.TZ from the cloud-sent timezone when it changes
+	applyTimezone(timezone) {
+		if (typeof timezone !== 'string' || !/^[A-Za-z_]+(\/[A-Za-z_+\-0-9]+)+$/.test(timezone)) {
+			return;
+		}
+
+		if (process.env.TZ === timezone) {
+			return;
+		}
+
+		process.env.TZ = timezone;
+		logger.info(`Schedule timezone set to ${timezone} (from the location's cloud config).`);
+	}
+
+	// clear a cloud command flag (reboot / update / reload) locally AND persist
+	// it, so a unit that restarts while offline does not re-run a command it
+	// already actioned. The cloud re-sends true on the next sync if the command
+	// is still pending on its side. Added 2026-09-04 (review M17).
+	clearCommandFlag(name) {
+		if (!['reboot', 'update', 'reload'].includes(name) || !this.config) {
+			return;
+		}
+
+		this.config[name] = false;
+		this.saveToFile();
 	}
 
 	// config summary - shallow copy of the full config, used for diagnostic dumps
