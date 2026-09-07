@@ -58,6 +58,12 @@ class ConfigManager {
 			// replace current config with the data from the file
 			this.config = JSON.parse(rawData);
 
+			// The schedule must run in the location's zone from the FIRST tick,
+			// not from the first successful sync — a unit that boots with no
+			// cloud reachable otherwise runs UTC until the WAN comes back
+			// (2026-09-04 second pass on review M22).
+			this.applyTimezone(this.config?.timezone);
+
 			// log success
 			logger.info('Successfully loaded configuration data from local JSON file!');
 

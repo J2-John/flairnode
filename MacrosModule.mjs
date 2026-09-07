@@ -29,7 +29,11 @@ const LAPTOP_MODE = (process.platform == 'darwin');
 const MACROS_PROCESSING_TIMEOUT = 60000;  // should be 60000ms
 
 const MACRO_ACTION_FILE_PATH = './lastMacroActioned.json';  // path to the file that tracks when reboot/update were last actioned
-const MACRO_ACTION_GUARD_WINDOW = 300000;  // don't re-action reboot/update within this window (should be 300000ms / 5 min)
+// Don't re-action reboot/update within this window. 15 min (was 5) so that it
+// outlasts the cloud's own 10-minute command TTL: with a 5-minute guard, a
+// reboot whose ack was lost could fire a second time while the cloud was still
+// re-sending the flag (review M17 residual, 2026-09-04 second pass).
+const MACRO_ACTION_GUARD_WINDOW = 900000;
 
 
 
@@ -49,6 +53,7 @@ class MacrosModule {
         this.rebootCommandSuccess = false;
         this.reloadCommandSuccess = false;
         this.updateCommandSuccess = false;
+        this.updateInFlight = false;   // true while update.sh is running (see handleUpdate)
 
         this.rebootCommandResults = '';
         this.reloadCommandResults = '';
@@ -250,11 +255,16 @@ class MacrosModule {
                     // report what actually happened last time, so the cloud clears
                     // the flag only on a real success (review M16). An unrecorded
                     // outcome (older record) keeps the previous behaviour.
+                    // No record (null) is NOT a success — see handleUpdate() for why.
+                    // shutdown -r +1 returns in milliseconds, so the outcome is always
+                    // recorded before the reboot itself happens a minute later.
                     const outcome = this.lastOutcome('reboot');
-                    this.rebootCommandSuccess = outcome === null ? true : outcome;
-                    this.rebootCommandResults = outcome === false
-                        ? 'Reboot was attempted recently and FAILED; not retrying inside the guard window.'
-                        : 'Reboot already actioned recently, skipped to avoid a loop.';
+                    this.rebootCommandSuccess = outcome === true;
+                    this.rebootCommandResults = outcome === true
+                        ? 'Reboot already actioned recently, skipped to avoid a loop.'
+                        : (outcome === false
+                            ? 'Reboot was attempted recently and FAILED; not retrying inside the guard window.'
+                            : 'Reboot was started recently but its outcome was not recorded; not retrying inside the guard window.');
 
                     // resolve without re-actioning
                     resolve(this.rebootCommandResults);
@@ -395,12 +405,27 @@ class MacrosModule {
                     // log that we're skipping
                     logger.warn(`Update already actioned recently, skipping to avoid an update loop.`);
 
-                    // report what actually happened last time (review M16) — see handleReboot()
+                    // Report what actually happened (review M16, tightened by the
+                    // 2026-09-04 second pass). Three states, none of them a blanket
+                    // success:
+                    //   still running  -> not done: the cloud keeps the flag and asks again
+                    //   recorded       -> that outcome
+                    //   no record      -> unknown (process restarted mid-run): NOT success
+                    // The first pass mapped "no record" to true, so an update.sh that
+                    // outlived one 15 s cycle was acked as success and its later
+                    // failure was never reported. Fleet update showed green regardless.
                     const outcome = this.lastOutcome('update');
-                    this.updateCommandSuccess = outcome === null ? true : outcome;
-                    this.updateCommandResults = outcome === false
-                        ? 'Update was attempted recently and FAILED; not retrying inside the guard window.'
-                        : 'Update already actioned recently, skipped to avoid a loop.';
+                    if (this.updateInFlight) {
+                        this.updateCommandSuccess = false;
+                        this.updateCommandResults = 'Update is still running; the result will be reported when it finishes.';
+                    } else {
+                        this.updateCommandSuccess = outcome === true;
+                        this.updateCommandResults = outcome === true
+                            ? 'Update already actioned recently, skipped to avoid a loop.'
+                            : (outcome === false
+                                ? 'Update was attempted recently and FAILED; not retrying inside the guard window.'
+                                : 'Update was started recently but its outcome was not recorded; not retrying inside the guard window.');
+                    }
 
                     // resolve without re-actioning
                     resolve(this.updateCommandResults);
@@ -420,8 +445,15 @@ class MacrosModule {
                 // Command to run the update
                 const command = './update.sh';
 
+                // update.sh can legitimately run for minutes (curl retries on a slow
+                // site link); every macro cycle until it exits must say "running",
+                // not "done". Cleared in the callback below.
+                this.updateInFlight = true;
+
                 // Execute the command
                 exec(command, (error, stdout, stderr) => {
+                    this.updateInFlight = false;
+
                     if (error) {
                         // if there was an error executing the command
 

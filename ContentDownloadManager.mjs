@@ -191,7 +191,15 @@ class ContentDownloadManager {
 				signal: controller.signal,
 			});
 
-			const expectedBytes = Number(response.headers['content-length']);
+			// Content-Length is the size ON THE WIRE. If the origin compressed the
+			// body (axios advertises gzip/br and decompresses transparently), the
+			// bytes written are the DECOMPRESSED size and the comparison is
+			// meaningless — skip it rather than fail every download forever
+			// (2026-09-04 second pass; latent, no current origin compresses mp4).
+			const encoded = typeof response.headers['content-encoding'] === 'string'
+				&& response.headers['content-encoding'].trim() !== ''
+				&& response.headers['content-encoding'].trim() !== 'identity';
+			const expectedBytes = encoded ? NaN : Number(response.headers['content-length']);
 
 			await pipeline(response.data, fs.createWriteStream(partPath));
 
@@ -235,9 +243,10 @@ class ContentDownloadManager {
 			for (const file of filesInContent) {
 				try {
 					// A .part left behind by a crash mid-download (the normal
-					// failure path already removes its own). Never the one being
-					// written right now.
-					if (file.endsWith('.part') && this.activeDownload?.filename !== file.slice(0, -5)) {
+					// failure path already removes its own). purgeOldFiles() runs
+					// only when the queue is empty and nothing is downloading, so
+					// every .part seen here is stale.
+					if (file.endsWith('.part')) {
 						fs.unlinkSync(path.join(OUTPUT_DIR, file));
 						deletedFiles.push(file);
 						continue;

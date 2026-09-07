@@ -633,10 +633,11 @@ System initializing...
 		// tick — a 1 s gap on slow media, and a permanent 1 Hz create/
 		// destroy loop on an unplayable file.
 		const VIDEO_LOAD_GRACE_MS = 15000;
+		// How often an element that has ERRORED is torn down and retried.
+		const VIDEO_ERROR_RETRY_MS = 30000;
 
 		function assertVideoIsPlaying(data) {
 			const existing = document.getElementById(data.dom_id);
-			let needsRender = true;
 
 			if (existing) {
 				// Handle VIDEO check
@@ -644,7 +645,13 @@ System initializing...
 					const ageMs = Date.now() - Number(existing.dataset.mountedAt || 0);
 
 					if (existing.error) {
-						// A real decode/network error: replace it below.
+						// A real decode/network error (a 404, an unplayable file). Retry
+						// by replacing it — but only every VIDEO_ERROR_RETRY_MS, not on
+						// every 1 s assert, or an unplayable file is a permanent 1 Hz
+						// create/destroy loop (2026-09-04 second pass on review M21).
+						if (ageMs < VIDEO_ERROR_RETRY_MS) {
+							return;
+						}
 					} else if (existing.readyState < 2 && ageMs < VIDEO_LOAD_GRACE_MS) {
 						return; // Still loading — leave it alone.
 					} else if (existing.readyState >= 2 && existing.paused && !existing.ended) {
@@ -676,14 +683,22 @@ System initializing...
 				existing.remove();
 			}
 
-			if (needsRender) { renderVideoFile(data); }
+			renderVideoFile(data);
 		}
 
 		function clearVideosExceptDomIds(data) {
 			try {
 				const domIdsToKeep = Array.isArray(data?.dom_ids) ? data.dom_ids.map(String) : [];
 
-				const all = document.querySelectorAll('video, img');
+				// Only the rendered-video layer is ours to clear. Selecting every
+				// <video>/<img> on the page removed #offline-indicator and the
+				// boot/error screens on the first rotation after boot, so
+				// show_offline_indicator later toggled a detached node and the
+				// one on-glass sign of a lost cloud never appeared (2026-09-04
+				// second pass; pre-existing, reached every second once the
+				// rotation keep-list was fixed).
+				const layout = document.getElementById('renderedVideosLayout');
+				const all = layout ? layout.querySelectorAll('video, img') : [];
 				all.forEach((el) => {
 					if (!domIdsToKeep.includes(el.id)) {
 						el.remove();
