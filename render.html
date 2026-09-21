@@ -182,6 +182,158 @@ System initializing...
 		});
 
 
+		// === Render health — OBSERVE ONLY (added 2026-09-21) ===
+		//
+		// The browser is the only thing that knows whether the wall is actually
+		// changing. Everything FlairNode.js reports about itself is liveness: on
+		// 2026-08-18 two Chromium instances fought over the render socket with the
+		// error image on the glass, and overallStatus said "online" throughout.
+		//
+		// Every HEALTH_REPORT_INTERVAL_MS this page tells FlairNode.js three things,
+		// because each catches a different lie:
+		//
+		//   page_frames   how many times the page painted. Stops if the browser
+		//                 hangs or crashes.
+		//   video_frames  how many video frames were actually presented. Stops
+		//                 when a decoder freezes on a last-good frame while the
+		//                 page keeps painting — the failure nothing else can see.
+		//   screen        which layer is on top. A page painting the ERROR image
+		//                 at 60fps is not healthy; a node with no wall showing its
+		//                 serial number is.
+		//
+		// page_session changes on every page load, so after a restart a watcher can
+		// tell a fresh report from one the previous build left behind.
+		//
+		// NOTHING ACTS ON THESE NUMBERS YET. Doctrine 2.9: an observer runs a full
+		// cycle before any enforcer is allowed to trust it.
+		//
+		// THIS CODE MUST NEVER THROW. The page's global error handler above puts up
+		// the error screen on ANY uncaught error, so a bug here would cause the very
+		// failure it exists to detect. Every entry point is wrapped, and none of it
+		// calls showErrorScreen().
+		const HEALTH_REPORT_INTERVAL_MS = 5000;
+		const pageSessionId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+		const pageLoadedAt = Date.now();
+
+		let pageFramesSinceReport = 0;
+		let videoFramesSinceReport = 0;
+		let lastHealthReportAt = Date.now();
+
+		// Counted per paint. requestAnimationFrame only fires when the browser is
+		// actually producing frames, so a hung renderer stops it.
+		function countPageFrame() {
+			try {
+				pageFramesSinceReport++;
+				requestAnimationFrame(countPageFrame);
+			} catch (err) {
+				console.error('health: page frame counter stopped:', err);
+			}
+		}
+
+		try {
+			requestAnimationFrame(countPageFrame);
+		} catch (err) {
+			console.error('health: could not start page frame counter:', err);
+		}
+
+		// Counted per PRESENTED video frame, via requestVideoFrameCallback — not
+		// timeupdate, which keeps firing on a video whose picture has frozen.
+		// Called once for each <video> this page creates.
+		function watchVideoFrames(video) {
+			try {
+				if (typeof video.requestVideoFrameCallback !== 'function') {
+					return;
+				}
+
+				const onFrame = function () {
+					try {
+						videoFramesSinceReport++;
+
+						// Stop re-arming once the element is gone, so a removed video
+						// leaves no callback chain behind.
+						if (video.isConnected) {
+							video.requestVideoFrameCallback(onFrame);
+						}
+					} catch (err) {
+						console.error('health: video frame counter stopped:', err);
+					}
+				};
+
+				video.requestVideoFrameCallback(onFrame);
+			} catch (err) {
+				console.error('health: could not watch video frames:', err);
+			}
+		}
+
+		function isShown(element) {
+			return !!element && element.style.display !== 'none' && element.style.display !== '';
+		}
+
+		// Which layer the viewer is looking at, highest first. The error and boot
+		// screens sit at z-index 1000 above everything, so they are checked first.
+		function visibleScreen() {
+			if (isShown(errorScreen)) return 'error';
+			if (isShown(bootScreen)) return 'boot';
+			if (isShown(document.getElementById('identifyThisNodeScreen'))) return 'identify';
+			if (isShown(document.getElementById('identifyNotThisNodeScreen'))) return 'identify';
+			if (isShown(document.getElementById('serialNumberScreen'))) return 'serial';
+
+			const content = document.getElementById('renderedVideosLayout');
+			if (content && content.children.length > 0) return 'content';
+
+			// Hiding this layer sets display:none but can leave its children in
+			// place, so children alone would report a layer nobody can see.
+			const zones = document.getElementById('wallTypeZonesLayout');
+			if (zones && zones.style.display !== 'none' && zones.children.length > 0) return 'zones';
+
+			return 'blank';
+		}
+
+		function sendHealthReport() {
+			try {
+				const now = Date.now();
+				const videos = document.querySelectorAll('#renderedVideosLayout video');
+
+				let videosPlaying = 0;
+				videos.forEach(function (v) {
+					if (!v.error && !v.paused && !v.ended && v.readyState >= 2) {
+						videosPlaying++;
+					}
+				});
+
+				const report = {
+					type: 'health',
+					data: {
+						page_session: pageSessionId,
+						page_age_ms: now - pageLoadedAt,
+						interval_ms: now - lastHealthReportAt,
+						page_frames: pageFramesSinceReport,
+						video_frames: videoFramesSinceReport,
+						videos_mounted: videos.length,
+						videos_playing: videosPlaying,
+						images_mounted: document.querySelectorAll('#renderedVideosLayout img').length,
+						screen: visibleScreen(),
+					},
+				};
+
+				// Counters restart every interval, sent or not. A report is
+				// "frames in the last interval_ms", never a running total, so a
+				// dropped socket cannot make an old burst look like current life.
+				pageFramesSinceReport = 0;
+				videoFramesSinceReport = 0;
+				lastHealthReportAt = now;
+
+				if (ws && ws.readyState === WebSocket.OPEN) {
+					ws.send(JSON.stringify(report));
+				}
+			} catch (err) {
+				console.error('health: report failed:', err);
+			}
+		}
+
+		setInterval(sendHealthReport, HEALTH_REPORT_INTERVAL_MS);
+
+
 		// handle the raw websocket message and attempt to parse into commands
 		function handleWebSocketMessage(msg) {
 			try {
@@ -595,6 +747,9 @@ System initializing...
 				// cannot be clobbered by OS-level Chromium config.
 				element.disableRemotePlayback = true;
 				element.setAttribute('disableremoteplayback', '');
+
+				// Render health: count this video's presented frames.
+				watchVideoFrames(element);
 
 				const shouldLoop = data.loop !== false;
 				element.loop = shouldLoop;

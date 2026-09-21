@@ -19,6 +19,7 @@ const logger = new Logger('NetworkModule');
 import configManager from './ConfigManager.mjs';
 import idManager from './IdManager.mjs';
 import environment from './EnvironmentConfig.mjs';
+import renderSocketClient from './RenderSocketClient.mjs';
 
 
 
@@ -285,6 +286,16 @@ class NetworkModule {
     	const securityCode = idManager.getSecurityCode();
     	if (typeof securityCode === 'string' && securityCode.length > 0) {
     		requestObject.security_code = securityCode;
+    	}
+
+    	// Render health, added 2026-09-21: what the BROWSER says it is painting
+    	// (see render.html). Current state rather than an event, so it rides at
+    	// the top level like firmware_version and never enters the missed-message
+    	// queue — replaying an hour-old frame count after an outage would be a lie.
+    	// Omitted until the page has reported once since this process started.
+    	const renderHealth = renderSocketClient.getRenderHealth();
+    	if (renderHealth) {
+    		requestObject.render_health = renderHealth;
     	}
 
     	// log the entire request object
