@@ -25,7 +25,12 @@ import environment from './EnvironmentConfig.mjs';
 // variables
 const CONTENT_DOWNLOAD_URL = `${environment.BASE_HOST}/storage/scene_renders/`;
 
-const OUTPUT_DIR = path.resolve('./content');
+// Where downloaded video goes. Decided in Paths.mjs (2026-09-21) — it was
+// path.resolve('./content'), i.e. relative to wherever the process happened to
+// be started from. render.html reads the same folder; see ensureLayout().
+import { CONTENT_DIR } from './Paths.mjs';
+const OUTPUT_DIR = CONTENT_DIR;
+export const CONTENT_OUTPUT_DIR = OUTPUT_DIR;
 const DOWNLOAD_TIMEOUT_MS = 5 * 60 * 1000;  // 5 minutes
 // TODO: known boot delay, revisit once Pi 5 startup timing is validated
 const INITIAL_SCAN_DELAY_MS = 20000;  // wait 20 seconds before first scan

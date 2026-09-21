@@ -36,7 +36,9 @@ const OFFLINE_THRESHOLD_MS = 35000;  // milliseconds since the last successful r
 
 const VERBOSE_LOGGING = false;
 
-const MISSED_MESSAGES_FILE_PATH = './';  // path to save the config JSON file to
+// The offline message queue's location is decided in Paths.mjs (2026-09-21).
+// It was './', i.e. wherever the process happened to be started from.
+import { MISSED_MESSAGES_FILE_PATH } from './Paths.mjs';
 const MAX_MESSAGES_TO_RESEND_AT_ONCE = 250;
 // Hard cap on entries kept in missedNetworkMessages.json while offline. Added
 // 2026-09-04 (review H12): with no cap the file grew ~21 MB/day and, because
@@ -85,7 +87,7 @@ class NetworkModule {
 
 		// Init missed messages system
 		this.errorCounter = 0;
-		this.filePath = MISSED_MESSAGES_FILE_PATH + 'missedNetworkMessages.json';
+		this.filePath = MISSED_MESSAGES_FILE_PATH;
 		this.loadMissedNetworkMessagesFlag = true; 
 		// this has to default to true. we have to assume, upon app start, that there have been missed messages, 
 		// and that the device was power cycled or something

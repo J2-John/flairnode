@@ -10,9 +10,8 @@
 
 // import modules
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import eventHub from './EventHub.mjs';
+import { ID_JSON_PATH } from './Paths.mjs';
 
 import Logger from './Logger.mjs';
 const logger = new Logger('IDManager');
@@ -21,15 +20,14 @@ const logger = new Logger('IDManager');
 
 // variables
 
-// id.json lives ONE DIRECTORY ABOVE this file, regardless of process.cwd() —
-// resolved from this module's own location (import.meta.url), not the old
-// '../' (relative to whatever directory the process happened to be launched
-// from, which broke unless FlairNode was started with cwd === this
-// directory). Deliberately outside the flairnode/ directory itself: a git
-// pull/clean of the app directory must never be able to wipe device
-// identity. ProvisioningManager.mjs writes this same path on first boot;
-// exported so it stays the single source of truth for both modules.
-export const ID_JSON_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'id.json');
+// id.json lives one directory above ~/flairnode — i.e. ~/id.json — in BOTH
+// on-disk layouts, deliberately outside anything an update replaces. Decided in
+// Paths.mjs since 2026-09-21: the old rule ("one directory above this file")
+// was right for the flat layout and would have looked in ~/flairnode/releases/
+// once the app runs from a release folder. Re-exported here because
+// ProvisioningManager.mjs imports it from this module, and it writes the same
+// file on first boot.
+export { ID_JSON_PATH };
 
 const VERBOSE_LOGGING = false;
 const LAPTOP_MODE = (process.platform == 'darwin');

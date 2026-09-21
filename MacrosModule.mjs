@@ -28,7 +28,12 @@ const SAMPLE_INTERVAL = 15000;  // interval for how often to process macros (sho
 const LAPTOP_MODE = (process.platform == 'darwin');
 const MACROS_PROCESSING_TIMEOUT = 60000;  // should be 60000ms
 
-const MACRO_ACTION_FILE_PATH = './lastMacroActioned.json';  // path to the file that tracks when reboot/update were last actioned
+// The file that records when reboot/update were last actioned. Its location is
+// decided in Paths.mjs (2026-09-21) — it was './lastMacroActioned.json', i.e.
+// wherever the process happened to be started from (NEW-F2, the same bug class
+// as the old id.json path). Exported so bench/paths-check.mjs can see it.
+import { MACRO_ACTION_FILE_PATH } from './Paths.mjs';
+export { MACRO_ACTION_FILE_PATH };
 // Don't re-action reboot/update within this window. 15 min (was 5) so that it
 // outlasts the cloud's own 10-minute command TTL: with a 5-minute guard, a
 // reboot whose ack was lost could fire a second time while the cloud was still

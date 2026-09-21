@@ -18,7 +18,9 @@ const logger = new Logger('ConfigManager');
 
 
 // variables
-const CONFIG_FILE_PATH = './';  // path to save the config JSON file to
+// config.json's location is decided in Paths.mjs (2026-09-21). It was './',
+// i.e. wherever the process happened to be started from.
+import { CONFIG_FILE_PATH } from './Paths.mjs';
 
 
 
@@ -29,7 +31,7 @@ class ConfigManager {
 	constructor() {
 		// create the this.config property for all config to be stored in
 		this.config = {};
-		this.filePath = CONFIG_FILE_PATH + 'config.json';
+		this.filePath = CONFIG_FILE_PATH;
 
 		// log levels
 		this.logLevels = ['none', 'minimal', 'interval', 'detail'];

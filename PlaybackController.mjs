@@ -33,7 +33,10 @@ const __dirname = dirname(__filename);
 // variables
 const INTERVAL_MS = 1000;  // how often to attempt processPlayback
 
-const OUTPUT_DIR = path.join(__dirname, 'content');
+// Was path.join(__dirname, 'content') — a SECOND answer to "where is content",
+// disagreeing with ContentDownloadManager's. Now the one answer, from Paths.mjs.
+import { CONTENT_DIR } from './Paths.mjs';
+const OUTPUT_DIR = CONTENT_DIR;
 
 
 

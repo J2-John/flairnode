@@ -25,6 +25,8 @@ import playbackController from './PlaybackController.mjs';
 import contentDownloadManager from './ContentDownloadManager.mjs';
 import triggerEngine from './TriggerEngine.mjs';
 
+import { LAYOUT, APP_DIR, DATA_DIR, ID_JSON_PATH, ensureLayout } from './Paths.mjs';
+
 
 
 // ==================== INITIALIZATION SEQUENCE ====================
@@ -33,6 +35,18 @@ import triggerEngine from './TriggerEngine.mjs';
 logger.info('Flair Node Device Firmware v1.0');
 logger.info('Copyright 2025 Drew Shipps, J Squared Systems');
 logger.info('System initializing at time ' + new Date());
+
+// Where this run will read and write its files, and — in a release folder —
+// linking the browser's content/ to the shared one. Before any module touches a
+// file. Logged every boot, because "which id.json did it read" is the first
+// question after any update, and should never need a shell to answer.
+const layoutResult = ensureLayout();
+logger.info(`Layout: ${LAYOUT} | code ${APP_DIR} | data ${DATA_DIR} | identity ${ID_JSON_PATH}`);
+if (/^(NOT LINKED|FAILED)/.test(layoutResult)) {
+	logger.error(`Layout: ${layoutResult}`);
+} else {
+	logger.info(`Layout: ${layoutResult}`);
+}
 
 
 // track which modules have reported that they've finished initializing, via the 'moduleReady' event
