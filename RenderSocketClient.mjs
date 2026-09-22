@@ -33,6 +33,13 @@ const WEBSOCKET_PORT = 9223;
 const HEALTH_DIR_CANDIDATES = ['/dev/shm', '/run/shm', '/tmp'];
 const HEALTH_FILE_NAME = 'flairnode-render-health.json';
 
+// Left by installer/flair-install.sh just before it restarts the app. The page
+// the browser has open is still the OLD release's render.html; it only becomes
+// the new one by reloading through `current`. So the first time the new app
+// sees the browser connect with this file present, it deletes the file and
+// tells the page to reload — once. Same RAM directory as the health file.
+const RELOAD_MARKER_NAME = 'flairnode-reload-browser';
+
 // The only keys accepted from the page, and their types. The page is ours, but
 // this goes to the cloud and into a file other tools parse, so its shape is
 // decided here rather than trusted.
@@ -92,6 +99,9 @@ class RenderSocketClient {
 			// accept client
 			this.clientSocket = ws;
 			logger.info(`Render client connected!! (clientAddress: ${clientAddress})`);
+
+			// just updated? make the browser load the new release's page
+			this.consumeReloadMarker();
 
 			// emit event
 			eventHub.emit('renderClientConnected');
@@ -195,22 +205,68 @@ class RenderSocketClient {
 	}
 
 
+	// The first writable RAM directory, decided once. null if none.
+	ramDir() {
+		if (this.ramDirPath === undefined) {
+			this.ramDirPath = null;
+
+			for (const dir of HEALTH_DIR_CANDIDATES) {
+				try {
+					fs.accessSync(dir, fs.constants.W_OK);
+					this.ramDirPath = dir;
+					break;
+				} catch (err) {
+					// try the next candidate
+				}
+			}
+		}
+
+		return this.ramDirPath;
+	}
+
+
+	// If the installer left a reload marker, delete it and reload the page ONCE.
+	//
+	// The file is deleted BEFORE the reload is sent, and if deleting fails the
+	// reload is not sent at all: the reloaded page reconnects and lands back
+	// here, so a marker that could not be removed would reload it forever.
+	// Never throws — an update must not be able to stop the wall from playing.
+	consumeReloadMarker() {
+		try {
+			const dir = this.ramDir();
+			if (!dir) {
+				return;
+			}
+
+			const marker = path.join(dir, RELOAD_MARKER_NAME);
+			if (!fs.existsSync(marker)) {
+				return;
+			}
+
+			try {
+				fs.unlinkSync(marker);
+			} catch (err) {
+				logger.error(`Found the post-update reload marker but could not delete it (${err.message}); NOT reloading, to avoid a reload loop.`);
+				return;
+			}
+
+			logger.info('Post-update: reloading the browser so it loads the new release\'s page.');
+
+			// A moment for the page to finish its own connect handling first.
+			setTimeout(() => this.send('reload_page'), 1000);
+		} catch (err) {
+			logger.error(`Post-update reload check failed: ${err.message}`);
+		}
+	}
+
+
 	// Atomic write: a reader never sees half a file. Failure is logged once and
 	// never thrown — a missing health file must not disturb playback.
 	writeHealthFile() {
 		try {
 			if (this.healthFilePath === undefined) {
-				this.healthFilePath = null;
-
-				for (const dir of HEALTH_DIR_CANDIDATES) {
-					try {
-						fs.accessSync(dir, fs.constants.W_OK);
-						this.healthFilePath = path.join(dir, HEALTH_FILE_NAME);
-						break;
-					} catch (err) {
-						// try the next candidate
-					}
-				}
+				const dir = this.ramDir();
+				this.healthFilePath = dir ? path.join(dir, HEALTH_FILE_NAME) : null;
 
 				if (this.healthFilePath === null) {
 					logger.warn('No writable RAM directory for the render-health file; health goes to the cloud only.');
