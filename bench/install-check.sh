@@ -51,17 +51,39 @@ done
 EOF
 chmod +x "$T/fake-app.sh"
 
-# The stand-in for `pm2 restart flairnode`: kill the old fake app, start a new one.
+# The stand-in for `pm2 restart flairnode` - and for what the BROWSER does next.
+#
+# On a real node the page is not restarted with the app. The old page stays on
+# screen, reconnects to the new app within a second and keeps reporting under
+# its OWN page_session until the new app tells it to reload (the reload marker),
+# some seconds later. Until 2026-09-22 this stand-in replaced the reporter
+# instantly, so the harness could never see an installer judge the OLD page -
+# which is exactly what the bench Pi 4 then did (1.1.6 install: "t+1s health:
+# ok", passed at 11 s, before the browser had reloaded).
+#
+# Modelled now: the old reporter (the old page) keeps running for
+# FAKE_RELOAD_DELAY seconds; then, only if the installer left the reload marker,
+# it is replaced by a new one loaded through `current` (the new page).
 cat > "$T/fake-restart.sh" <<'EOF'
 #!/usr/bin/env bash
 ROOT="$1"; RAM="$2"
+echo restart >> "$ROOT/.restarts"
+[ -e "$RAM/flairnode-reload-browser" ] || exit 0
+setsid -f "$(dirname "$0")/fake-reload.sh" "$ROOT" "$RAM" >/dev/null 2>&1 < /dev/null
+EOF
+chmod +x "$T/fake-restart.sh"
+
+cat > "$T/fake-reload.sh" <<'EOF'
+#!/usr/bin/env bash
+ROOT="$1"; RAM="$2"
+sleep "${FAKE_RELOAD_DELAY:-3}"
 [ -f "$ROOT/.fake-app.pid" ] && kill "$(cat "$ROOT/.fake-app.pid")" 2>/dev/null
+rm -f "$RAM/flairnode-reload-browser"
 setsid -f "$(dirname "$0")/fake-app.sh" "$ROOT" "$RAM" >/dev/null 2>&1 < /dev/null
 sleep 0.2
 pgrep -f "fake-app.sh $ROOT " | tail -1 > "$ROOT/.fake-app.pid"
-echo restart >> "$ROOT/.restarts"
 EOF
-chmod +x "$T/fake-restart.sh"
+chmod +x "$T/fake-reload.sh"
 
 # ---------------------------------------------------------------- fixtures
 
@@ -118,12 +140,17 @@ current_of() { basename "$(readlink "$1/current")"; }
 
 echo; echo "HEALTHY UPDATE"
 R="$(make_unit a 1.0.0)"; make_tarball "$T/a.tgz" 1.1.0 good
+OLD_SESSION="$(grep -o '"page_session":"[^"]*"' "$T/a/ram/flairnode-render-health.json")"
 install "$R" "$T/a/ram" --enforce --watch 20 1.1.0 "$T/a.tgz"; rc=$?
 is "exit 0" "$rc" 0
 is "outcome ok" "$(outcome "$R")" ok
 is "current is the new release" "$(current_of "$R")" 1.1.0
 is "previous is the old release" "$(basename "$(readlink "$R/previous")")" 1.0.0
-is "the browser-reload marker was left for the new app" "$([ -e "$T/a/ram/flairnode-reload-browser" ] && echo yes)" yes
+# The pass must come from the page loaded AFTER the swap: the reload marker has
+# been used and the report that passed is not the old page's.
+is "the browser was told to reload (marker consumed)" "$([ -e "$T/a/ram/flairnode-reload-browser" ] && echo left || echo consumed)" consumed
+is "the page reporting is a new one, not the old page" "$([ "$(grep -o '"page_session":"[^"]*"' "$T/a/ram/flairnode-render-health.json")" != "$OLD_SESSION" ] && echo new || echo old)" new
+is "the installer saw the old page and did not count it" "$(grep -c 'health: old-page' "$R/.last-run.log")" 1
 is "no half-unpacked folder left behind" "$(ls -A "$R/releases" | grep -c partial)" 0
 stop_unit "$R"
 
@@ -134,7 +161,7 @@ is "exit 2" "$rc" 2
 is "outcome rolled_back" "$(outcome "$R")" rolled_back
 is "current is back on the old release" "$(current_of "$R")" 1.0.0
 is "the app was restarted twice (install, rollback)" "$(wc -l < "$R/.restarts" | tr -d ' ')" 2
-sleep 2
+sleep 5   # the browser reloads a few seconds after the restart (FAKE_RELOAD_DELAY 3)
 is "after rollback the old release reports healthy again" "$(grep -o '"screen":"[a-z]*"' "$T/b/ram/flairnode-render-health.json" | cut -d'"' -f4)" content
 stop_unit "$R"
 

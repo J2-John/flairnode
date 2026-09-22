@@ -273,6 +273,17 @@ say "current -> $VERSION_WANTED (previous $FROM_DIR)"
 
 # ---------------------------------------------------------------- 5. restart
 
+# The page on screen NOW belongs to the old release, and it does not go away
+# when the app restarts: it reconnects to the new app within a second and keeps
+# reporting, under its own page_session, until the new app has it reload. Its
+# reports say nothing about the new release. Remembered here, BEFORE
+# restart_app deletes the file, so the watch can refuse them.
+#
+# Found on the bench Pi 4, 2026-09-22 (1.1.6 install): "t+1s health: ok",
+# passed at 11 s - three healthy reports from the OLD page, before the browser
+# had loaded the new one. A new release that broke its page would have passed.
+OLD_PAGE_SESSION="$(field page_session "$HEALTH_FILE")"
+
 SWAPPED_AT="$(date +%s)"
 restart_app
 
@@ -282,7 +293,6 @@ restart_app
 STREAK=0
 VERDICT=""
 LAST_CLASS=""
-BEFORE_SESSION=""   # the old page's session was deleted with its file; any session now is new
 
 while :; do
     NOW="$(date +%s)"
@@ -305,6 +315,11 @@ while :; do
 
         if [ "$FILE_AGE" -gt "$REPORT_STALE_SECONDS" ]; then
             CLASS="stale"
+        elif [ -n "$OLD_PAGE_SESSION" ] && [ "$(field page_session "$HEALTH_FILE")" = "$OLD_PAGE_SESSION" ]; then
+            # Still the old release's page (see OLD_PAGE_SESSION). Not a pass,
+            # not a failure: wait for the reload. A new release whose page never
+            # takes over stays here until the window ends - and fails.
+            CLASS="old-page"
         elif [ "$SCREEN" = "error" ]; then
             CLASS="errored"
         elif [ "$SCREEN" = "boot" ] || [ -z "$SCREEN" ]; then
