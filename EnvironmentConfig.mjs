@@ -9,10 +9,18 @@ const USE_LOCALHOST = false;
 // checks whether we're running on macOS (laptop dev mode) or not
 const LAPTOP_MODE = (process.platform === 'darwin');
 
-// default base host used when FLAIR_BASE_HOST isn't set in the environment
+// default base host used when FLAIR_BASE_HOST isn't set in the environment.
+//
+// device.flairled.com, ruled by John 2026-09-22 for the golden image: the ONE
+// address every new card talks to, and the same default the tunnel enrollment
+// script carries. It was https://flairled.com, which still pointed at the
+// legacy droplet - a card with no override would have synced against the old
+// server. Moving the fleet to another server later is a DNS change to this
+// name, not a new image. A unit that sets FLAIR_BASE_HOST in its pm2 process
+// (the documented bring-up for every unit so far does) is unaffected.
 const DEFAULT_BASE_HOST = (USE_LOCALHOST && LAPTOP_MODE)
 	? 'http://flairled.test'
-	: 'https://flairled.com';
+	: 'https://device.flairled.com';
 
 // the base host every cloud URL is built from. NetworkModule (sync) and
 // ContentDownloadManager (content downloads) both derive their URLs from this

@@ -22,9 +22,17 @@
 # /etc/chromium.d/ or a policy file), which can inject additional flags
 # this script never passes.
 
+# Where this copy of the app lives, AS INVOKED - deliberately not symlink-
+# resolved (pwd -L). Flat layout: ~/flairnode. Release layout (golden image,
+# 2026-09): ~/flairnode/current, the symlink the installer swaps. Resolving it
+# would pin the autostart entry and the page to whichever release happened to
+# be current the day the entry was written, and a firmware update would then
+# never reach the screen.
+APP_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -L)"
+
 AUTOSTART_DIR="$HOME/.config/autostart"
 AUTOSTART_FILE="$AUTOSTART_DIR/flairnode-kiosk.desktop"
-SCRIPT_PATH="$HOME/flairnode/flairnode-kiosk.sh"
+SCRIPT_PATH="$APP_DIR/flairnode-kiosk.sh"
 
 if [ ! -f "$AUTOSTART_FILE" ]; then
         echo "Installing kiosk autostart entry at $AUTOSTART_FILE..."
@@ -246,7 +254,7 @@ echo "Starting Chromium test kiosk..."
 sleep 3;
 
 CHROMIUM_FLAGS=(
-        --kiosk "file://$HOME/flairnode/render.html"
+        --kiosk "file://$APP_DIR/render.html"
         --noerrdialogs
         --disable-session-crashed-bubble
         --no-first-run
