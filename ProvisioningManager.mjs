@@ -120,7 +120,13 @@ function writeIdFile({ node_id, serial_number, security_code }) {
 		security_code: security_code,
 	};
 
-	fs.writeFileSync(ID_JSON_PATH, JSON.stringify(contents, null, 2));
+	// 0600: this file holds the claim PIN, so only the pi user may read it.
+	// Measured 2026-09-22 on the bench Pi 4 (FN-00010): without a mode it
+	// landed 0664, readable by every account on the board. `mode` only applies
+	// when the file is CREATED, so the chmod covers a file that already
+	// existed with looser permissions (a re-provision over an old id.json).
+	fs.writeFileSync(ID_JSON_PATH, JSON.stringify(contents, null, 2), { mode: 0o600 });
+	fs.chmodSync(ID_JSON_PATH, 0o600);
 }
 
 
