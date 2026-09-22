@@ -584,8 +584,15 @@ class NetworkModule {
     	try {
 			rawData = fs.readFileSync(this.filePath);
     	} catch (error) {
-    		// log a warning that no file was found
-    		logger.warn('No file found at ' + this.filePath + ' (error: ' + error.message + ')');
+    		// No file is the normal state of a node that has never lost its
+    		// connection: the file is only written once there is something to
+    		// resend. Treated as an empty list, silently (1.1.5) - on the bench Pi 4,
+    		// 2026-09-22, this warning read as a fault in the device log after every
+    		// fresh start. Any OTHER read failure (permissions, a damaged disk) is
+    		// still a warning.
+    		if (error.code !== 'ENOENT') {
+    			logger.warn('Could not read ' + this.filePath + ' (error: ' + error.message + ')');
+    		}
     	}
 
     	// variable to hold the parsed data

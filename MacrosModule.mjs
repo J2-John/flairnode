@@ -32,7 +32,7 @@ const MACROS_PROCESSING_TIMEOUT = 60000;  // should be 60000ms
 // decided in Paths.mjs (2026-09-21) — it was './lastMacroActioned.json', i.e.
 // wherever the process happened to be started from (NEW-F2, the same bug class
 // as the old id.json path). Exported so bench/paths-check.mjs can see it.
-import { MACRO_ACTION_FILE_PATH } from './Paths.mjs';
+import { MACRO_ACTION_FILE_PATH, LAYOUT } from './Paths.mjs';
 export { MACRO_ACTION_FILE_PATH };
 // Don't re-action reboot/update within this window. 15 min (was 5) so that it
 // outlasts the cloud's own 10-minute command TTL: with a 5-minute guard, a
@@ -403,6 +403,25 @@ class MacrosModule {
 
             // check if an update command has been queued from the server
             if (this.updateQueuedFromServer == true) {
+
+                // REFUSED ON THE RELEASE LAYOUT (1.1.5). A node in release folders is
+                // updated by Install Firmware (the server ships a release; the
+                // installer swaps `current`). update.sh belongs to the old flat layout:
+                // it downloads GitHub's main and copies it over the folder it runs in.
+                // On the bench Pi 4, 2026-09-22, that folder was a RELEASE folder, and
+                // the release the installer would roll back to was silently replaced
+                // with different code. So this path never runs here, whatever the
+                // working directory - and it says so rather than failing on a missing
+                // file. Not reported as success: the cloud keeps the flag until it
+                // expires (flairled COMMAND_TTL_MINUTES), and nothing was updated.
+                if (LAYOUT === 'release') {
+                    configManager.clearCommandFlag('update');
+                    this.updateCommandSuccess = false;
+                    this.updateCommandResults = 'Refused: this node is on the release layout and is updated with Install Firmware, not Run Update.';
+                    logger.warn(this.updateCommandResults);
+                    resolve(this.updateCommandResults);
+                    return;
+                }
 
                 // check if this update was already actioned recently, to avoid looping
                 // if the cloud hasn't cleared the update flag yet
