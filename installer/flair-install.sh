@@ -116,8 +116,13 @@ if [ -z "${FLAIR_INSTALL_DETACHED:-}" ]; then
 
     if [ -z "${FLAIR_NO_SYSTEMD:-}" ] && command -v systemd-run >/dev/null 2>&1 \
         && systemd-run --user --quiet --collect --unit="flair-install-probe-$$" /bin/true >/dev/null 2>&1; then
+        # StandardOutput/StandardError: the run's own log goes to the SAME file
+        # the setsid path writes and the line below names. Without them it went
+        # to the systemd journal, and on the bench Pi 4 (2026-09-22) the file
+        # this message pointed at did not exist.
         systemd-run --user --quiet --collect --unit="flair-install-$VERSION_WANTED" \
             --setenv=FLAIR_INSTALL_DETACHED=1 --setenv=HOME="$HOME" --setenv=PATH="$PATH" \
+            --property=StandardOutput="append:$LAUNCH_LOG" --property=StandardError="append:$LAUNCH_LOG" \
             /bin/bash "$0" "${ARGS[@]}" >/dev/null 2>&1 \
             && { echo "STARTED systemd unit flair-install-$VERSION_WANTED; log $LAUNCH_LOG"; exit 0; }
     fi
@@ -348,7 +353,10 @@ if [ "$VERDICT" = "pass" ]; then
     finish 0 ok "healthy after $(( $(date +%s) - SWAPPED_AT ))s (last: $LAST_CLASS)"
 fi
 
-REASON="unhealthy after ${WATCH_SECONDS}s window (last: ${LAST_CLASS:-none})"
+# The time actually taken, not the window's length: an error screen past the
+# grace period ends the watch early, and on the bench Pi 4 (2026-09-22) a
+# rollback decided at 31 s was recorded as "unhealthy after 90s window".
+REASON="unhealthy after $(( $(date +%s) - SWAPPED_AT ))s of a ${WATCH_SECONDS}s window (last: ${LAST_CLASS:-none})"
 
 if [ "$ENFORCE" != 1 ] || [ -e "$SHARED/.no-health-rollback" ]; then
     finish 0 would_roll_back "$REASON — observe mode, kept $VERSION_WANTED"
