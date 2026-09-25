@@ -52,6 +52,9 @@
 	<!-- serial number -->
 	<div id="serialNumberScreen" style="display: none; background-color: black; width: 100%; height: 100%; position: absolute; overflow: hidden;"></div>
 
+	<!-- commissioning screen - shown on first boot at the J2 facility, while the node brings itself to the current release -->
+	<div id="commissioningScreen" style="display: none; background-color: black; width: 100%; height: 100%; position: absolute; overflow: hidden;"></div>
+
 	<!-- wall type zones layout -->
 	<div id="wallTypeZonesLayout" style="position: relative; width: 100%; height: 100%;"></div>
 
@@ -377,6 +380,7 @@ System initializing...
 				case 'identify_this_node':
 					hideWallTypesLayout();
 					hideSerialNumberScreen();
+					hideCommissioningScreen();
 					showIdentifyScreen(true, data?.serial_number);
 					hideAllRenderedVideoFiles();
 					break;
@@ -384,20 +388,36 @@ System initializing...
 				case 'identify_not_this_node':
 					hideWallTypesLayout();
 					hideSerialNumberScreen();
+					hideCommissioningScreen();
 					showIdentifyScreen(false, data?.serial_number);
 					hideAllRenderedVideoFiles();
 					break;
 
+				// show_serial_number is how commissioning ENDS: the server stops
+				// sending the block, PlaybackController falls through to its
+				// wall-type fallback, and this case takes the commissioning
+				// screen down. That is why hideCommissioningScreen() here is not
+				// housekeeping - it is the transition.
 				case 'show_serial_number':
 					hideIdentifyScreen();
 					hideWallTypesLayout();
+					hideCommissioningScreen();
 					showSerialNumberScreen(data?.serial_number, data?.security_code);
+					hideAllRenderedVideoFiles();
+					break;
+
+				case 'show_commissioning':
+					hideIdentifyScreen();
+					hideSerialNumberScreen();
+					hideWallTypesLayout();
+					showCommissioningScreen(data?.state, data?.step, data?.version);
 					hideAllRenderedVideoFiles();
 					break;
 
 				case 'disable_identify_mode':
 					hideIdentifyScreen();
 					hideSerialNumberScreen();
+					hideCommissioningScreen();
 					hideWallTypesLayout();
 					hideAllRenderedVideoFiles();
 					break;
@@ -405,6 +425,7 @@ System initializing...
 				case 'show_wall_type_zones_layout':
 					hideIdentifyScreen();
 					hideSerialNumberScreen();
+					hideCommissioningScreen();
 					showWallTypeZonesLayout(data);
 					hideAllRenderedVideoFiles();
 					break;
@@ -412,6 +433,7 @@ System initializing...
 				case 'show_wall_type_zones_layout_with_time':
 					hideIdentifyScreen();
 					hideSerialNumberScreen();
+					hideCommissioningScreen();
 					showWallTypeZonesLayoutWithTime(data);
 					hideAllRenderedVideoFiles();
 					break;
@@ -419,6 +441,7 @@ System initializing...
 				case 'render_video_file':
 					hideIdentifyScreen();
 					hideSerialNumberScreen();
+					hideCommissioningScreen();
 					hideWallTypesLayout();
 					renderVideoFile(data);
 					break;
@@ -430,6 +453,7 @@ System initializing...
 				case 'assert_video_is_playing':
 					hideIdentifyScreen();
 					hideSerialNumberScreen();
+					hideCommissioningScreen();
 					hideWallTypesLayout();
 					assertVideoIsPlaying(data);
 					break;
@@ -437,6 +461,7 @@ System initializing...
 				case 'clear_videos_except_dom_ids':
 					hideIdentifyScreen();
 					hideSerialNumberScreen();
+					hideCommissioningScreen();
 					hideWallTypesLayout();
 					clearVideosExceptDomIds(data);
 					break;
@@ -575,6 +600,95 @@ System initializing...
 
 		function hideSerialNumberScreen() {
 			const targetDiv = document.getElementById('serialNumberScreen');
+
+			targetDiv.style.display = 'none';
+		}
+
+
+
+		// COMMISSIONING SCREEN - first boot, on the bench at the J2 facility.
+		//
+		// THE WORDS LIVE HERE, not on the server. The sync response carries a
+		// state, a step and a version; this function decides what a person
+		// standing in front of the wall actually reads. Two reasons, both
+		// deliberate: a customer-visible surface takes no free text from an API,
+		// and wording that lives in this file is versioned with the firmware
+		// that draws it.
+		//
+		// Tiled 170 times for the same reason the serial screen is - a wall is
+		// many panels and a person is usually standing in front of one of them,
+		// so the message has to be readable wherever they happen to be looking.
+		function showCommissioningScreen(state, step, version) {
+			const targetDiv = document.getElementById('commissioningScreen');
+
+			let line1, line2, line3;
+			let background = 'black';
+
+			if (state === 'stuck') {
+				// John's ruling, 2026-09-25: an explicit NOT COMPLETE screen
+				// rather than a quiet fallback to the serial number. A unit
+				// showing this is NOT on the release it is supposed to ship
+				// with, and the whole purpose of the screen is to stop somebody
+				// printing a label for it anyway. Red, because the identify
+				// screens already teach that red means "not this one".
+				background = '#7f0000';
+				line1 = 'NOT COMPLETE';
+				line2 = 'DO NOT SHIP';
+				line3 = 'SEE FLAIR';
+			} else if (step === 'installing') {
+				line1 = 'INSTALLING';
+				line2 = version ? version : 'UPDATE';
+				line3 = 'DO NOT CYCLE POWER';
+			} else {
+				// 'checking' - and anything unrecognised. An unknown step still
+				// means the server considers this node uncommissioned, so the
+				// safe screen is the one that says do not pull the plug.
+				line1 = 'INSTALLING';
+				line2 = 'PLEASE WAIT';
+				line3 = 'DO NOT CYCLE POWER';
+			}
+
+			targetDiv.style.backgroundColor = background;
+			targetDiv.style.display = 'grid';
+			targetDiv.style.gridTemplateColumns = 'repeat(auto-fill, minmax(180px, 1fr))';
+			targetDiv.style.gridAutoRows = '60px'; // fixed row height
+			targetDiv.style.gap = '0px';
+			targetDiv.style.padding = '5px';
+			targetDiv.style.color = 'white';
+			targetDiv.style.fontSize = '16px';
+			targetDiv.style.fontFamily = 'monospace';
+			targetDiv.style.overflow = 'hidden';
+			targetDiv.style.height = '100vh'; // full screen height
+
+			const text = `${line1}<br>${line2}<br>${line3}`;
+
+			// generate grid cells
+			const totalBlocks = 170;
+			let gridHtml = '';
+
+			for (let i = 0; i < totalBlocks; i++) {
+				gridHtml += `
+					<div style="
+						background: none;
+						display: flex;
+						flex-direction: column;
+						align-items: center;
+						justify-content: center;
+						text-align: center;
+						width: 180px;
+						height: 60px;
+					">
+						${text}
+					</div>
+				`;
+			}
+
+			// inject grid into target
+			targetDiv.innerHTML = gridHtml;
+		}
+
+		function hideCommissioningScreen() {
+			const targetDiv = document.getElementById('commissioningScreen');
 
 			targetDiv.style.display = 'none';
 		}

@@ -155,6 +155,31 @@ class PlaybackController {
 	    			});
 				}
 			} else {
+				// COMMISSIONING - first boot, on the bench at the J2 facility.
+				//
+				// Checked BEFORE the wall-type fallback below, and this order is
+				// the feature. A node being commissioned has no wall type yet, so
+				// without this it would fall straight through to the serial and
+				// claim-code screen - and that screen is the signal to print a
+				// label. It must not appear until the node is actually running
+				// the release it will ship with.
+				//
+				// The server sends a state, a step and a version. It does not
+				// send words: render.html owns those, so the wording is versioned
+				// with the firmware that draws it and nothing reaching the server
+				// can change what a customer-visible surface says.
+				const commissioning = configManager.getCommissioning();
+
+				if (commissioning) {
+					this.safeSend('show_commissioning', {
+						state: commissioning.state,
+						step: commissioning.step,
+						version: commissioning.version,
+					});
+
+					return;
+				}
+
 				// get wall type info
 				const wallType = configManager.getWallType();
 

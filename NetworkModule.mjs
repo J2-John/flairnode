@@ -421,6 +421,14 @@ class NetworkModule {
 
     		// console.log(data);
 
+    		// COMMISSIONING rides top-level in the sync response and must not
+    		// reach configManager.update(), which persists everything handed to
+    		// it. Taken out first and given its own in-memory slot, where the
+    		// ABSENCE of the block is meaningful: it is how the server says
+    		// commissioning is over. See ConfigManager.setCommissioning().
+    		configManager.setCommissioning(data.commissioning ?? null);
+    		delete data.commissioning;
+
     		// update the config manager with the new data
     		configManager.update(data);
 

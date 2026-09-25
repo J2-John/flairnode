@@ -33,6 +33,11 @@ class ConfigManager {
 		this.config = {};
 		this.filePath = CONFIG_FILE_PATH;
 
+		// commissioning state - deliberately OUTSIDE this.config, because
+		// everything in this.config is written to disk. See
+		// setCommissioning() for why that distinction is load-bearing.
+		this.commissioning = null;
+
 		// log levels
 		this.logLevels = ['none', 'minimal', 'interval', 'detail'];
 	}
@@ -268,6 +273,31 @@ class ConfigManager {
 	// custom times
 	getCustomTimes() {
         return this.config.custom_times ?? [];
+	}
+
+
+	// ----- COMMISSIONING -----
+	//
+	// Set from every sync response; NEVER merged into this.config and
+	// therefore never written to config.json. That is the whole point.
+	//
+	// mergeObjects() can only ADD or OVERWRITE a key - it has no branch that
+	// removes one - and update() saves the result to disk. Commissioning ends
+	// by the server no longer sending the block, so if it lived in config it
+	// would be written on first boot and then stay there forever, and the wall
+	// of a node commissioned months ago would read DO NOT CYCLE POWER on every
+	// boot for the rest of its life.
+	//
+	// In memory instead: each sync overwrites it (with null when the block is
+	// absent), a restart clears it, and the next sync re-derives it from the
+	// server, which is the only thing that knows. Nothing persisted cannot go
+	// stale.
+	setCommissioning(commissioning) {
+		this.commissioning = commissioning ?? null;
+	}
+
+	getCommissioning() {
+		return this.commissioning;
 	}
 
 
