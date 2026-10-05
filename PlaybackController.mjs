@@ -33,6 +33,12 @@ const __dirname = dirname(__filename);
 // variables
 const INTERVAL_MS = 1000;  // how often to attempt processPlayback
 
+// How many values a Sense TYPE=1 DATA field may carry. 19 is the current
+// unit; 16 is the older one still in the field. Reasoning, the incident that
+// found it, and the condition for removing the 16 are all in
+// validateSenseDataObject().
+const ACCEPTED_SENSE_PORT_COUNTS = [16, 19];
+
 // Was path.join(__dirname, 'content') — a SECOND answer to "where is content",
 // disagreeing with ContentDownloadManager's. Now the one answer, from Paths.mjs.
 import { CONTENT_DIR } from './Paths.mjs';
@@ -432,7 +438,35 @@ class PlaybackController {
 
 
 	// validateSenseDataObject - validate the DATA field of a Sense TYPE=1 packet
-	// DATA must be 19 comma-separated binary values: ports 0-14 = carwash inputs, ports 15-18 = relay/contact closure inputs
+	//
+	// 19 values is the current Sense: ports 0-14 = carwash inputs,
+	// ports 15-18 = relay/contact closure inputs.
+	//
+	// 16 IS ACCEPTED TOO, AND IT IS NOT A COURTESY - IT IS THE FLEET AS IT
+	// STANDS (John's ruling, 2026-10-05), until the older Sense units are
+	// updated. Found on FN-00007: that site's Sense sends 16 values, and this
+	// validator had been rejecting every one of them - 10,431 of them - since
+	// the node was taken from firmware 1.0 to 1.1.8 on 2026-10-02. The node
+	// played its scheduled content perfectly throughout and the dashboard
+	// showed it Connected, so nothing anywhere said the wall had stopped
+	// reacting to cars.
+	//
+	// WHY THIS BROKE WHEN IT DID. The check arrived in d0ae78a (2026-07-01)
+	// and ships in every tag from v1.1.0 on; before that the call was
+	// commented out, so firmware 1.0 accepted any length. A node on 1.0 at a
+	// site with an older Sense worked by accident, and updating it was what
+	// surfaced the mismatch.
+	//
+	// NO PADDING, DELIBERATELY. TriggerEngine.processSenseData() loops on
+	// dataArray.length rather than a constant, and compares against a
+	// previousSenseData of the same length, so a 16-value packet simply
+	// exercises ports 1-16 and never touches 17-19 - which is the truth about
+	// a unit that has no relay inputs. Padding to 19 would add a second place
+	// that knows how many ports exist.
+	//
+	// This is a transitional allowance. When the Sense fleet is updated, the
+	// 16 comes out - and the ONLY safe way to remove it is to confirm no node
+	// is still receiving 16-value packets, not to assume the rollout finished.
 	validateSenseDataObject(object) {
 		if (typeof object?.DATA !== 'string') {
 			logger.warn(`Sense packet rejected: DATA is missing or not a string (ID: ${object?.ID})`);
@@ -441,8 +475,8 @@ class PlaybackController {
 
 		const parts = object.DATA.split(',');
 
-		if (parts.length !== 19) {
-			logger.warn(`Sense packet rejected: DATA has ${parts.length} values, expected 19 (ID: ${object?.ID})`);
+		if (!ACCEPTED_SENSE_PORT_COUNTS.includes(parts.length)) {
+			logger.warn(`Sense packet rejected: DATA has ${parts.length} values, expected ${ACCEPTED_SENSE_PORT_COUNTS.join(' or ')} (ID: ${object?.ID})`);
 			return false;
 		}
 
