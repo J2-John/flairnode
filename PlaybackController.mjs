@@ -93,7 +93,11 @@ class PlaybackController {
 		// directly; TriggerEngine -> PlaybackController is eventHub-only,
 		// so neither module imports the other in a cycle)
 		eventHub.on('triggerShow', (data) => {
-			this.playSceneById(data.sceneId, true, false, data.zIndex, data.domId);
+			// repeat comes from TriggerEngine's portState: false for an
+			// exclusive trigger, which plays its clip through once, true for
+			// every other mode. Defaulted to true so an engine that has never
+			// heard of the flag behaves exactly as before.
+			this.playSceneById(data.sceneId, data.repeat !== false, false, data.zIndex, data.domId);
 		});
 
 		eventHub.on('triggerHide', (data) => {

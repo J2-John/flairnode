@@ -94,6 +94,18 @@ class TriggerEngine {
 		// other way for an active trigger to be excluded from this set.
 		this.visiblePorts = new Set();
 
+		// Monotonic fire counter, for ordering exclusive evictions.
+		//
+		// NOT A TIMESTAMP, and that is the point. firedAt is milliseconds, and
+		// two ports can rise in the SAME packet or in two packets processed
+		// inside the same millisecond — which makes firedAt tie, makes a
+		// stable sort fall back to Object.keys() order, and hands the glass to
+		// the LOWER-numbered port, i.e. the one that did NOT just fire. Caught
+		// by the harness on 2026-10-05 with seven red checks; it would have
+		// worked on a bench where packets arrive 100 ms apart and failed in the
+		// field whenever two inputs closed together. A counter cannot tie.
+		this.fireSequence = 0;
+
 		// last-seen 19-element Sense port array, for inactive->active edge
 		// detection. null until the first packet arrives — the very first
 		// packet only establishes a baseline (see processSenseData), since
@@ -256,7 +268,8 @@ class TriggerEngine {
 		// Per-trigger mode. ABSENT MEANS PULSE, deliberately: a config synced
 		// from a cloud that has never heard of this field must behave exactly
 		// as it did before the field existed. Anything that isn't the literal
-		// string 'switch' is pulse — this never guesses from a truthy value.
+		// string 'switch' or 'exclusive' is pulse — this never guesses from a
+		// truthy value.
 		//
 		// pulse:  fire on the rising edge, run for duration_seconds, expire on
 		//         its own. The contact opening again means nothing.
@@ -265,8 +278,44 @@ class TriggerEngine {
 		//         forward on every held-high packet), and end the moment it
 		//         opens. durationMs is carried here so that refresh has the
 		//         window length without re-reading config on every packet.
-		const mode = triggerConfig.mode === 'switch' ? 'switch' : 'pulse';
-		const durationMs = durationSeconds * 1000;
+		// exclusive: fire on the rising edge like pulse, but CLEAR every other
+		//         visible pulse-family trigger (resolveVisibility does the
+		//         evicting), and play the clip ONCE at its own length rather
+		//         than looping for duration_seconds. John's ruling 2026-10-05;
+		//         see claude/trigger-mode-exclusive-spec.md.
+		//
+		// NOTE FOR A NODE ON OLDER FIRMWARE: 'exclusive' collapses to pulse
+		// here, silently, while the role editor still shows Exclusive
+		// selected. Check the firmware version before diagnosing "Exclusive
+		// isn't working".
+		const mode = triggerConfig.mode === 'switch' ? 'switch'
+			: triggerConfig.mode === 'exclusive' ? 'exclusive'
+			: 'pulse';
+
+		// EXCLUSIVE TAKES ITS WINDOW FROM THE CLIP, NOT THE CONFIG (E5). The
+		// scene's own length is already in the sync payload as
+		// total_length_seconds and had simply never been read by the firmware
+		// — no cloud change was needed for this.
+		//
+		// Falls back to duration_seconds when that is missing, zero or not a
+		// number (E6): an old or part-rendered scene must still fire. A
+		// trigger that refuses to fire is worse than one that runs for the
+		// wrong length, and the fallback says so in the log rather than
+		// looking like a correct window.
+		let durationMs = durationSeconds * 1000;
+		let windowSource = 'duration_seconds';
+
+		if (mode === 'exclusive') {
+			const scene = configManager.getScenes()?.find(s => s.id === triggerConfig.scene_id);
+			const clipSeconds = Number(scene?.total_length_seconds);
+
+			if (Number.isFinite(clipSeconds) && clipSeconds > 0) {
+				durationMs = clipSeconds * 1000;
+				windowSource = 'total_length_seconds';
+			} else {
+				logger.warn(`Trigger port ${port} is exclusive but scene ${triggerConfig.scene_id} has no usable total_length_seconds (${scene?.total_length_seconds}) — falling back to duration_seconds (${durationSeconds}s).`);
+			}
+		}
 
 		// Re-fire restarts the countdown (new expiresAt) whether currently
 		// visible or hidden (locked ruleset §3) — a plain overwrite already
@@ -274,12 +323,21 @@ class TriggerEngine {
 		this.portState[port] = {
 			sceneId: triggerConfig.scene_id,
 			firedAt: now,
+			// Strictly increasing, never equal. See the constructor for why a
+			// timestamp will not do here.
+			firedSeq: ++this.fireSequence,
 			expiresAt: now + durationMs,
 			mode,
 			durationMs,
+			// Exclusive plays its clip through once; every other mode loops
+			// for its window as before. Carried on the state because
+			// showTrigger() is what hands it to PlaybackController, and that
+			// can happen long after the fire (the governor can admit a port
+			// it previously shed).
+			repeat: mode !== 'exclusive',
 		};
 
-		logger.info(`Trigger port ${port} ${isReFire ? 're-fired' : 'fired'} (${mode}) -> scene ${triggerConfig.scene_id}, expires in ${durationSeconds}s`);
+		logger.info(`Trigger port ${port} ${isReFire ? 're-fired' : 'fired'} (${mode}) -> scene ${triggerConfig.scene_id}, expires in ${Math.round(durationMs / 1000)}s (${windowSource})`);
 
 		return true;
 	}
@@ -381,6 +439,65 @@ class TriggerEngine {
 	// there.
 	resolveVisibility() {
 		try {
+			// EXCLUSIVE EVICTION, BEFORE the cap pass and deliberately ahead of
+			// it (John's ruling 2026-10-05; claude/trigger-mode-exclusive-spec.md).
+			//
+			// Among pulse-family ports — 'pulse' and 'exclusive' — if any
+			// EXCLUSIVE one is active, only the most recently fired survives
+			// and the rest are dropped from portState entirely. Dropped, not
+			// merely hidden: an evicted trigger is finished, not waiting for a
+			// slot, so leaving it in portState would let the governor hand it
+			// the glass back seconds later.
+			//
+			// SWITCH PORTS ARE NEVER TOUCHED HERE (E4). A switch is held closed
+			// by physical hardware; if it lost the glass it would not return
+			// until someone opened and closed that contact, so a closed input
+			// would sit there showing nothing.
+			//
+			// A plain PULSE fire evicts nothing (E3) — this block only runs at
+			// all when an exclusive port is present, which is what keeps every
+			// existing site's behaviour identical after the update.
+			const pulseFamily = Object.keys(this.portState)
+				.map(Number)
+				.filter(port => this.portState[port].mode !== 'switch');
+
+			if (pulseFamily.length > 1) {
+				// Most recent wins, by firedSeq — a strictly increasing counter,
+				// NOT firedAt. Two ports rising in the same packet, or in two
+				// packets handled inside the same millisecond, tie on a
+				// timestamp; the stable sort then falls back to Object.keys()
+				// order and the LOWER port wins, which is the one that did not
+				// just fire. A counter cannot tie.
+				const newest = pulseFamily
+					.slice()
+					.sort((a, b) => this.portState[b].firedSeq - this.portState[a].firedSeq)[0];
+
+				// THE EVICTION IS DRIVEN BY WHAT FIRED MOST RECENTLY, not by an
+				// exclusive merely being present (E3). An exclusive port that
+				// fired earlier does not evict a pulse that fires after it —
+				// only an exclusive arriving LAST clears the rest. Getting this
+				// backwards is what the harness caught: the first version
+				// evicted a running exclusive whenever any pulse fired.
+				//
+				// Written this way it is also idempotent, which matters because
+				// resolveVisibility() is re-run by checkExpiries() and the load
+				// governor as well as by a fire: if the newest is still the
+				// exclusive, the others are already gone and this does nothing.
+				if (this.portState[newest].mode === 'exclusive') {
+					for (const port of pulseFamily) {
+						if (port !== newest) {
+							logger.info(`Trigger port ${port} evicted by exclusive port ${newest}`);
+							delete this.portState[port];
+						}
+					}
+				}
+			}
+
+			// ----- unchanged from here down -----
+			// The cap and port-priority pass is deliberately untouched, so the
+			// load governor stays authoritative: under load it can still shed
+			// an exclusive port in favour of a higher-numbered one. A mode
+			// preference must not override a safety valve.
 			const activePorts = Object.keys(this.portState)
 				.map(Number)
 				.sort((a, b) => b - a);  // descending: higher port = higher priority
@@ -421,6 +538,12 @@ class TriggerEngine {
 			sceneId: state.sceneId,
 			domId: this.domIdForPort(port),
 			zIndex: this.zIndexForPort(port),
+			// Exclusive plays once; everything else loops for its window.
+			// Read off the state rather than recomputed, because a port can
+			// become visible long after it fired (the governor can admit one
+			// it previously shed) and the mode must not be re-derived from a
+			// config that may have changed in between.
+			repeat: state.repeat !== false,
 		});
 
 		logger.info(`Trigger port ${port} now VISIBLE -> scene ${state.sceneId}`);
