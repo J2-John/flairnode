@@ -335,6 +335,13 @@ class TriggerEngine {
 			// can happen long after the fire (the governor can admit a port
 			// it previously shed).
 			repeat: mode !== 'exclusive',
+			// A re-fire of a play-once trigger has to be put back on the glass
+			// explicitly — see the reshow branch in resolveVisibility(). Set
+			// ONLY for exclusive: a pulse re-fire must keep behaving exactly as
+			// it did before this mode existed, and its clip is still looping on
+			// screen anyway, so re-showing it would restart a video that never
+			// stopped.
+			reshow: isReFire && mode === 'exclusive',
 		};
 
 		logger.info(`Trigger port ${port} ${isReFire ? 're-fired' : 'fired'} (${mode}) -> scene ${triggerConfig.scene_id}, expires in ${Math.round(durationMs / 1000)}s (${windowSource})`);
@@ -508,8 +515,38 @@ class TriggerEngine {
 
 			// newly visible -> show
 			for (const port of accepted) {
+				const state = this.portState[port];
+
 				if (!previouslyVisible.has(port)) {
 					this.showTrigger(port);
+				} else if (state.reshow) {
+					// A RE-FIRE OF A PLAY-ONCE TRIGGER. Reported from the bench
+					// 2026-10-06 as "a second trigger will not play", and
+					// reproduced: tripping an Exclusive port again inside its own
+					// window put nothing on the glass.
+					//
+					// Why it needs its own branch: render.html's renderVideoFile
+					// attaches an 'ended' listener to a non-looping clip that
+					// REMOVES the element. So when a play-once clip finishes there
+					// is nothing on screen, while this engine still counts the port
+					// as visible until expiresAt — and showTrigger() above only
+					// runs for a port that is not already visible. For a LOOPING
+					// trigger "visible" and "showing" were the same thing, so
+					// restarting the countdown was enough. Play-once separated
+					// them and the old assumption no longer holds.
+					//
+					// Hide THEN show, rather than show alone, because
+					// assertVideoIsPlaying() returns early on a healthy video: a
+					// re-trip while the clip is still running would otherwise let
+					// it carry on from where it was instead of starting again,
+					// which is not what "cut it off and put this one in its place"
+					// means.
+					this.hideTrigger(port);
+					this.showTrigger(port);
+				}
+
+				if (state.reshow) {
+					delete state.reshow;
 				}
 			}
 
